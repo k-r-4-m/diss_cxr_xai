@@ -6,3 +6,5 @@ multi_label_xray_model.h5
 0.zip
 padchest_labels.csv
 old captioning.ipynb
+agkd-src/*
+florence_attempt/florence2_large/*

@@ -2,7 +2,7 @@ chest_xray/*
 archive.zip
 paste.py
 multi_label_xray_model.h5
-0/*
+padchest_images/*
 0.zip
 padchest_labels.csv
 old captioning.ipynb

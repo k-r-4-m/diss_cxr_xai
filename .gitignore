@@ -7,5 +7,5 @@ padchest_images/*
 padchest_labels.csv
 old captioning.ipynb
 src/*
+florence_attempt/florence2_large
 florence_attempt/florence2_large/*
-florence_attempt

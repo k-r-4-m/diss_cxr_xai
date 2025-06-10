@@ -9,3 +9,4 @@ old captioning.ipynb
 src/*
 florence_attempt/florence2_large
 florence_attempt/florence2_large/*
+florence_attempt/lightning_logs

@@ -3,8 +3,8 @@ model:
   lora_config: "configs/lora_config.yaml"
   init_checkpoint: "checkpoints/mimic_model_init.pt"
   processor:
-    image_size: 512
-    crop_size: 512
+    image_size: 128
+    crop_size: 128
   peft:
     use_peft: True
     lora_checkpoint: "False"

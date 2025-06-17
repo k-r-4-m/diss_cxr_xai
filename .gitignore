@@ -11,3 +11,7 @@ florence_attempt/florence2_large
 florence_attempt/florence2_large/*
 florence_attempt/lightning_logs
 outputs/*
+florence_attempt/pretrained_model.pth
+florence_attempt/saved_models/pretrained_model.pth
+florence_attempt/saved_models/pretrained_model1.pth
+florence_attempt/saved_models/pretrained_model2.pth

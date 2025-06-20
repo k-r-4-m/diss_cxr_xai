@@ -1,5 +1,5 @@
 model:
-  model_type: "microsoft/Florence-2-base-ft"  # change if needed
+  model_type: "microsoft/Florence-2-large-ft"  # change if needed
   lora_config: "configs/lora_config.yaml"
   init_checkpoint: "checkpoints/mimic_model_init.pt"
   processor:
@@ -15,8 +15,8 @@ trainer:
   project_name: "Knowledge-AG"  # wandb project name
   entity_name: "compai"   # wandb entity name
   max_epochs: 10  # change please!
-  train_batch_size: 20
-  valid_batch_size: 20
+  train_batch_size: 5
+  valid_batch_size: 5
   num_workers: 0  # number of subprocesses for data loading, can be higher if more system resources
   log_every_n_steps: 100
   gpu: 0
@@ -33,7 +33,7 @@ dataset:
     data_pct: 1.0
 
   vindr:
-    img_root: "E:/vinbigdata_xrays/vinbigdata/train/"  # only the training set is annotated
+    img_root: "E:/vinbigdata_xrays/vinbigdata/train/png"  # only the training set is annotated
     annotation_csv: "E:/vinbigdata_xrays/vinbigdata/train.csv"
     data_pct: 1.0
 

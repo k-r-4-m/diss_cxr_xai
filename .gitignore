@@ -15,3 +15,6 @@ florence_attempt/pretrained_model.pth
 florence_attempt/saved_models/pretrained_model.pth
 florence_attempt/saved_models/pretrained_model1.pth
 florence_attempt/saved_models/pretrained_model2.pth
+florence_attempt/aa_m/*
+florence_attempt/florence_2_base_ft
+florence_attempt/9a5094b2563a1ef3ff50dc5c7ff71345.png

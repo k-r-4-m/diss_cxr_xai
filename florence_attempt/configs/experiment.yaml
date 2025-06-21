@@ -22,7 +22,7 @@ trainer:
   gpu: 0
   ddp: false
   optimizer: "adamw"
-  learning_rate: 3e-3   # this was 3e-6 before
+  learning_rate: 3e-6   # this was 3e-6 before
   weight_decay: 0.01
 
 dataset:

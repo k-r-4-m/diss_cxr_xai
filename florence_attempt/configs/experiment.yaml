@@ -14,9 +14,9 @@ trainer:
   checkpoint_dir: "../outputs"
   project_name: "Knowledge-AG"  # wandb project name
   entity_name: "compai"   # wandb entity name
-  max_epochs: 50  # change please!
-  train_batch_size: 5
-  valid_batch_size: 5
+  max_epochs: 5  # change please!
+  train_batch_size: 10
+  valid_batch_size: 10
   num_workers: 0  # number of subprocesses for data loading, can be higher if more system resources
   log_every_n_steps: 100
   gpu: 0

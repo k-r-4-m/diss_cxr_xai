@@ -14,7 +14,7 @@ trainer:
   checkpoint_dir: "../outputs"
   project_name: "Knowledge-AG"  # wandb project name
   entity_name: "compai"   # wandb entity name
-  max_epochs: 5  # change please!
+  max_epochs: 50  # change please!
   train_batch_size: 10
   valid_batch_size: 10
   num_workers: 0  # number of subprocesses for data loading, can be higher if more system resources
@@ -34,6 +34,7 @@ dataset:
 
   vindr:
     img_root: "E:/vinbigdata_xrays/vinbigdata/train/png"  # only the training set is annotated
+    dicom_root: "E:/vinbigdata_xrays/vinbigdata/train/dicom"  # file path for the original DICOM images
     annotation_csv: "E:/vinbigdata_xrays/vinbigdata/train.csv"
     data_pct: 1.0
 

@@ -35,6 +35,7 @@ dataset:
   vindr:
     img_root: "E:/vinbigdata_xrays/vinbigdata/train/png"  # only the training set is annotated
     dicom_root: "E:/vinbigdata_xrays/vinbigdata/train/dicom"  # file path for the original DICOM images
+    img_size: 128
     annotation_csv: "E:/vinbigdata_xrays/vinbigdata/train.csv"
     data_pct: 1.0
 

@@ -22,3 +22,4 @@ florence_attempt/pretrained_model/*
 florence_attempt/pretrained_processor/*
 florence_attempt/fine_tuning_florence_example.ipynb
 florence_attempt/logs/image/*
+chest xray examples/*

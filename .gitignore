@@ -23,3 +23,7 @@ florence_attempt/pretrained_processor/*
 florence_attempt/fine_tuning_florence_example.ipynb
 florence_attempt/logs/image/*
 chest xray examples/*
+classes distribution.png
+florence_attempt/flor.py
+/florence_attempt/model_checkpoints
+output.png

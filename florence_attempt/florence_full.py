@@ -15,6 +15,7 @@ from PIL import Image
 from tqdm import tqdm
 from IPython.core.display import HTML
 from datetime import datetime
+from pathvalidate import sanitize_filename
 import io
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -47,15 +48,9 @@ DICOM_DIR = "./dicom/"
 ANNOTATIONS_CSV = "./train_original.csv"
 OUTPUT_DIR = "./output_dataset/"
 
-# import os
-# import pandas as pd
-# import pydicom
-# import numpy as np
-# from PIL import Image
-# from sklearn.model_selection import train_test_split
-# import json
-# from tqdm import tqdm
-# from pydicom.pixel_data_handlers.util import apply_voi_lut
+
+###-----prepares the data----###
+## not needed to run if the data is already preprocessed and ready for training
 
 # IMAGE_EXT = ".png"
 # TARGET_LONG_SIDE = 500
@@ -268,7 +263,7 @@ OUTPUT_DIR = "./output_dataset/"
 # print(results_df["min_iou"].mean())
 # print(results_df["max_iou"].mean())
 # print(results_df["avg_iou"].mean())
-# @title Define `DetectionsDataset` class
+
 
 # makes a dataset given a jsonl file
 class JSONLDataset:
@@ -361,51 +356,88 @@ torch.cuda.empty_cache()
 # @title Run inference with pre-trained Florence-2 model on validation dataset
 
 
-def render_inline(image: Image.Image, resize=(128, 128)):
-    """Convert image into inline html."""
-    image.resize(resize)
-    with io.BytesIO() as buffer:
-        image.save(buffer, format='jpeg')
-        image_b64 = str(base64.b64encode(buffer.getvalue()), "utf-8")
-        return f"data:image/jpeg;base64,{image_b64}"
+# def render_inline(image: Image.Image, resize=(128, 128)):
+#     """Convert image into inline html."""
+#     image.resize(resize)
+#     with io.BytesIO() as buffer:
+#         image.save(buffer, format='jpeg')
+#         image_b64 = str(base64.b64encode(buffer.getvalue()), "utf-8")
+#         return f"data:image/jpeg;base64,{image_b64}"
 
 
-def render_example(image: Image.Image, response):
-    try:
-        detections = sv.Detections.from_lmm(sv.LMM.FLORENCE_2, response, resolution_wh=image.size)
-        image = sv.BoxAnnotator(color_lookup=sv.ColorLookup.INDEX).annotate(image.copy(), detections)
-        image = sv.LabelAnnotator(color_lookup=sv.ColorLookup.INDEX).annotate(image, detections)
-    except:
-        print('failed to render model response')
-    return f"""
-<div style="display: inline-flex; align-items: center; justify-content: center;">
-    <img style="width:256px; height:256px;" src="{render_inline(image, resize=(128, 128))}" />
-    <p style="width:512px; margin:10px; font-size:small;">{html.escape(json.dumps(response))}</p>
-</div>
-"""
+# def render_example(image: Image.Image, response):
+#     try:
+#         detections = sv.Detections.from_lmm(sv.LMM.FLORENCE_2, response, resolution_wh=image.size)
+#         image = sv.BoxAnnotator(color_lookup=sv.ColorLookup.INDEX).annotate(image.copy(), detections)
+#         image = sv.LabelAnnotator(color_lookup=sv.ColorLookup.INDEX).annotate(image, detections)
+#     except:
+#         print('failed to render model response')
+#     return f"""
+# <div style="display: inline-flex; align-items: center; justify-content: center;">
+#     <img style="width:256px; height:256px;" src="{render_inline(image, resize=(128, 128))}" />
+#     <p style="width:512px; margin:10px; font-size:small;">{html.escape(json.dumps(response))}</p>
+# </div>
+# """
 
 
-def render_inference_results(model, dataset: DetectionDataset, count: int):
-    html_out = ""
+# def render_inference_results(model, dataset: DetectionDataset, count: int):
+#     html_out = ""
+#     count = min(count, len(dataset))
+#     for i in range(count):
+#         image, data = dataset.dataset[i]
+#         prefix = data['prefix']
+#         suffix = data['suffix']
+#         inputs = processor(text=prefix, images=image, return_tensors="pt").to(DEVICE)
+#         generated_ids = model.generate(
+#             input_ids=inputs["input_ids"],
+#             pixel_values=inputs["pixel_values"],
+#             max_new_tokens=1024,
+#             num_beams=1
+#         )
+#         generated_text = processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
+#         answer = processor.post_process_generation(generated_text, task='<OD>', image_size=image.size)
+#         html_out += render_example(image, answer)
+
+#     display(HTML(html_out))
+
+# render_inference_results(peft_model, val_dataset, 4)
+
+# saves the inference results as a jpg to track how the model is doing over time
+def save_inference_results(model, dataset: DetectionDataset, count: int, save_dir: str, epoch="none"):
+    os.makedirs(save_dir, exist_ok=True)
     count = min(count, len(dataset))
+
     for i in range(count):
         image, data = dataset.dataset[i]
         prefix = data['prefix']
         suffix = data['suffix']
+
         inputs = processor(text=prefix, images=image, return_tensors="pt").to(DEVICE)
         generated_ids = model.generate(
             input_ids=inputs["input_ids"],
             pixel_values=inputs["pixel_values"],
             max_new_tokens=1024,
-            num_beams=1
+            num_beams=3
         )
         generated_text = processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
         answer = processor.post_process_generation(generated_text, task='<OD>', image_size=image.size)
-        html_out += render_example(image, answer)
 
-    display(HTML(html_out))
+        try:
+            detections = sv.Detections.from_lmm(sv.LMM.FLORENCE_2, answer, resolution_wh=image.size)
+            image_annotated = sv.BoxAnnotator(color_lookup=sv.ColorLookup.INDEX).annotate(image.copy(), detections)
+            image_annotated = sv.LabelAnnotator(color_lookup=sv.ColorLookup.INDEX).annotate(image_annotated, detections)
+            
+            # saves example images of annotations
+            filename = f"epoch{epoch}_{i:03d}_{detections.data['class_name']}.jpg".replace(" ", "_")
+            filename = sanitize_filename(filename, platform="windows")   # cleans filename to make sure it gets saved
+            filepath = os.path.join(save_dir, filename)
+            image_annotated.save(filepath)
+            print(f"Saved: {filepath}")
+        except Exception as e:
+            print(f"Failed to annotate image {i}: {e}")
 
-render_inference_results(peft_model, val_dataset, 4)
+save_inference_results(peft_model, val_dataset, 4, save_dir="./before_training")
+
 
 ## Fine-tune Florence-2 on custom object detection dataset
 
@@ -420,7 +452,7 @@ def train_model(train_loader, val_loader, model, processor, epochs=10, lr=1e-6):
         num_training_steps=num_training_steps,
     )
 
-    render_inference_results(peft_model, val_loader.dataset, 6)
+    # save_inference_results(peft_model, val_loader.dataset, 6, save_dir="./inference_training")
 
     # runs model for given number of epochs
     for epoch in range(epochs):
@@ -472,7 +504,7 @@ def train_model(train_loader, val_loader, model, processor, epochs=10, lr=1e-6):
             avg_val_loss = val_loss / len(val_loader)
             print(f"Average Validation Loss: {avg_val_loss}")
 
-            render_inference_results(peft_model, val_loader.dataset, 6)
+            save_inference_results(peft_model, val_loader.dataset, 6, save_dir="./training_images_annotated", epoch=str(epoch))
 
         output_dir = f"./model_checkpoints/epoch_{epoch+1}"
         os.makedirs(output_dir, exist_ok=True)

@@ -27,3 +27,4 @@ classes distribution.png
 florence_attempt/flor.py
 /florence_attempt/model_checkpoints
 output.png
+/florence_attempt/before_training

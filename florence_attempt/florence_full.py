@@ -7,13 +7,13 @@ from torch.utils.data import DataLoader, Dataset
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix
 from torchvision.transforms.functional import to_pil_image
-from IPython.display import display
+# from IPython.display import display
 from pydicom.pixel_data_handlers.util import apply_voi_lut
 from difflib import get_close_matches
 from typing import List, Dict, Any, Tuple, Generator
 from PIL import Image
 from tqdm import tqdm
-from IPython.core.display import HTML
+# from IPython.core.display import HTML
 from datetime import datetime
 from pathvalidate import sanitize_filename
 import io
@@ -21,13 +21,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 import numpy as np
-import albumentations as A
 import torchvision.transforms as T
 import supervision as sv
 import yaml
 import pydicom
-import tensorflow as tf
-import os
 import re
 import json
 import html
@@ -348,8 +345,11 @@ config = LoraConfig(
     revision=REVISION
 )
 
-peft_model = get_peft_model(model, config)
-peft_model.print_trainable_parameters()
+# peft_model = get_peft_model(model, config)
+# peft_model.print_trainable_parameters()
+
+## removing peft
+peft_model = model
 
 torch.cuda.empty_cache()
 
@@ -425,7 +425,7 @@ def save_inference_results(model, dataset: DetectionDataset, count: int, save_di
         try:
             detections = sv.Detections.from_lmm(sv.LMM.FLORENCE_2, answer, resolution_wh=image.size)
             image_annotated = sv.BoxAnnotator(color_lookup=sv.ColorLookup.INDEX).annotate(image.copy(), detections)
-            image_annotated = sv.LabelAnnotator(color_lookup=sv.ColorLookup.INDEX).annotate(image_annotated, detections)
+            image_annotated = sv.LabelAnnotator(text_scale=1, text_thickness=2, color_lookup=sv.ColorLookup.INDEX).annotate(image_annotated, detections)
             
             # saves example images of annotations
             filename = f"epoch{epoch}_{i:03d}_{detections.data['class_name']}.jpg".replace(" ", "_")

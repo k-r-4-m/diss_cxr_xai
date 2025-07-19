@@ -16,9 +16,10 @@ from tqdm import tqdm
 # from IPython.core.display import HTML
 from datetime import datetime
 from pathvalidate import sanitize_filename
+from collections import defaultdict
+from  supervision.detection.utils import box_iou_batch
 import io
 import matplotlib.pyplot as plt
-import seaborn as sns
 import pandas as pd
 import numpy as np
 import torchvision.transforms as T
@@ -33,17 +34,20 @@ import itertools
 
 
 EPOCHS = 50
-REVISION = 'refs/pr/24' 
-DICOM_DIR = "E:/vinbigdata_xrays/vinbigdata/train/dicom"
-ANNOTATIONS_CSV = "E:/vinbigdata_xrays/vinbigdata/train_original.csv"
-OUTPUT_DIR = "E:/vinbigdata_xrays/output_dataset/"
-BATCH_SIZE = 6  # batch size for training
+REVISION = 'refs/pr/24'  # revision of florence-2 that fixes the GenerationMixin import error
+DICOM_DIR = "./dicom/"
+ANNOTATIONS_CSV = "./train_original.csv"
+OUTPUT_DIR = "./output_dataset/"
+BATCH_SIZE = 20  # batch size for training
 NUM_WORKERS = 0  # number of workers for data loading
 
+# collates samples to form a batch of tensors
+# needed for training
 def collate_fn(batch):
     questions, answers, images = zip(*batch)
     inputs = processor(text=list(questions), images=list(images), return_tensors="pt", padding=True).to(DEVICE)
     return inputs, answers
+
 
 # makes a dataset given a jsonl file
 class JSONLDataset:
@@ -65,7 +69,7 @@ class JSONLDataset:
 
     def __getitem__(self, idx: int) -> Tuple[Image.Image, Dict[str, Any]]:
         if idx < 0 or idx >= len(self.entries):
-            raise IndexError("Index out of range")
+            raise IndexError("index out of range!")
 
         entry = self.entries[idx]
         image_path = os.path.join(self.image_directory_path, entry['image'])
@@ -73,7 +77,7 @@ class JSONLDataset:
             image = Image.open(image_path)
             return (image, entry)
         except FileNotFoundError:
-            raise FileNotFoundError(f"Image file {image_path} not found.")
+            raise FileNotFoundError(f"image file {image_path} not found")
 
 
 # forms a dataloader for a given dataset
@@ -199,12 +203,104 @@ print(f"map50: {mean_average_precision.map50:.2f}")
 print(f"map75: {mean_average_precision.map75:.2f}")
 
 # calculates and outputs the confusion matrix
-confusion_matrix = sv.ConfusionMatrix.from_detections(
+conf_matrix = sv.ConfusionMatrix.from_detections(
     predictions=predictions,
     targets=targets,
     classes=CLASSES
 )
 
 # saves the confusion matrix as an image
-fig = confusion_matrix.plot()
+fig = conf_matrix.plot()
 fig.savefig("confusion_matrix.png", dpi=300, bbox_inches='tight')
+
+
+# calculates the per-class IoU values
+def compute_per_class_iou(preds, gts, num_classes):
+    # dictionary to hold IoU values for each class
+    iou_per_class = defaultdict(list)
+
+    # for each prediction and ground truth
+    for pred, gt in zip(preds, gts):
+        # for each class, calcualte the IoU
+        for cls in range(num_classes):
+            pred_cls = pred[pred.class_id == cls]
+            gt_cls = gt[gt.class_id == cls]
+
+            # no predicted or ground truth for this class
+            if len(gt_cls) == 0 and len(pred_cls) == 0:
+                continue
+
+            iou_matrix = box_iou_batch(gt_cls.xyxy, pred_cls.xyxy)
+
+            if iou_matrix.size == 0:
+                continue  # nothing to match, i.e. no prediction
+
+            matched_pred = set()
+            matched_gt = set()
+
+            for gt_idx, ious in enumerate(iou_matrix):
+                if ious.size == 0:
+                    continue
+
+                best_pred_idx = np.argmax(ious)
+                iou = ious[best_pred_idx]
+                if iou >= 0.5 and best_pred_idx not in matched_pred:
+                    iou_per_class[cls].append(iou)
+                    matched_pred.add(best_pred_idx)
+                    matched_gt.add(gt_idx)
+
+    # returns the average IoU per class
+    avg_iou_per_class = {CLASSES[cls]: np.mean(iou_list) if iou_list else 0.0 for cls, iou_list in iou_per_class.items()}
+
+    # ensure all classes are included, even if empty
+    for cls in range(num_classes):
+        class_name = CLASSES[cls]
+        if class_name not in avg_iou_per_class:
+            avg_iou_per_class[class_name] = 0.0
+
+    return avg_iou_per_class
+
+# calculates precision and recall
+conf_mat = conf_matrix.matrix  # gets the actual matrix from the confusion matrix
+precision_per_class = {}
+recall_per_class = {}
+f1_per_class = {}
+epsilon = 1e-8  # used to add small constant for f1 score, prevents divison by zero
+
+# for each class, calculate precision and recall
+for i, class_name in enumerate(CLASSES):
+    TP = conf_mat[i, i]  # true positives
+    FP = conf_mat[:, i].sum() - TP  # false positives
+    FN = conf_mat[i, :].sum() - TP  # false negatives
+
+    precision = TP / (TP + FP) if TP + FP > 0 else 0.0
+    recall = TP / (TP + FN) if TP + FN > 0 else 0.0
+    precision_per_class[class_name] = precision
+    recall_per_class[class_name] = recall
+
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+    f1_per_class[class_name] = f1
+
+total_TP = np.trace(conf_mat)  # total true positives
+total_FP = conf_mat.sum(axis=0).sum() - total_TP  # total false positives
+total_FN = conf_mat.sum(axis=1).sum() - total_TP  # total false negatives
+
+overall_precision = np.mean(list(precision_per_class.values()))
+overall_recall = np.mean(list(recall_per_class.values()))
+overall_f1 = np.mean(list(f1_per_class.values()))
+
+print("\n per class IoU:")
+iou_scores = compute_per_class_iou(predictions, targets, num_classes=len(CLASSES))
+for cls, iou in iou_scores.items():
+    print(f"{cls}: IoU = {iou:.3f}")
+
+print("\n per class precision, recall, and f1")
+for cls in CLASSES:
+    print(f"{cls}: precision = {precision_per_class[cls]:.3f}, "
+          f"recall = {recall_per_class[cls]:.3f}, "
+          f"f1 = {f1_per_class[cls]:.3f}")
+
+print("\n overall precision, recall, and f1")
+print(f"precision = {overall_precision:.3f}")
+print(f"recall = {overall_recall:.3f}")
+print(f"f1 = {overall_f1:.3f}")

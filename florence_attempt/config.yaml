@@ -1,0 +1,7 @@
+num_workers: 0  # number of workers for data loading
+epochs: 50
+batch_size: 18
+revision: 'refs/pr/24'  # revision of florence-2 that fixes the GenerationMixin import error
+annotations_csv: './train_original.csv'
+output_dir: './output_dataset/'
+dicom_dir: './dicom/'

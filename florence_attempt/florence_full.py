@@ -16,6 +16,7 @@ from tqdm import tqdm
 # from IPython.core.display import HTML
 from datetime import datetime
 from pathvalidate import sanitize_filename
+from florence_tools import *
 import io
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -31,20 +32,26 @@ import html
 import base64
 import itertools
 
+# loads the config file for epochs, revision, pathnames, etc.
+config_path = "./config.yaml"
+config = load_config(config_path)
+
+EPOCHS = config.get('epochs')
+REVISION = config.get('revision')
+DICOM_DIR = config.get('dicom_dir')
+ANNOTATIONS_CSV = config.get('annotations_csv')
+OUTPUT_DIR = config.get('output_dir')
+BATCH_SIZE = config.get('batch_size')
+NUM_WORKERS = config.get('num_workers')
+print("config loaded")
 
 
 CHECKPOINT = "microsoft/Florence-2-base-ft"
-REVISION = 'refs/pr/24'  # revision of florence-2 that fixes the GenerationMixin import error
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # loads the model and processor for florence-2
 model = AutoModelForCausalLM.from_pretrained(CHECKPOINT, trust_remote_code=True, revision=REVISION).to(DEVICE)
 processor = AutoProcessor.from_pretrained(CHECKPOINT, trust_remote_code=True, revision=REVISION)
-
-DICOM_DIR = "./dicom/"
-ANNOTATIONS_CSV = "./train_original.csv"
-OUTPUT_DIR = "./output_dataset/"
-
 
 ###-----prepares the data----###
 ## not needed to run if the data is already preprocessed and ready for training
@@ -261,61 +268,6 @@ OUTPUT_DIR = "./output_dataset/"
 # print(results_df["max_iou"].mean())
 # print(results_df["avg_iou"].mean())
 
-
-# makes a dataset given a jsonl file
-class JSONLDataset:
-    def __init__(self, jsonl_file_path: str, image_directory_path: str):
-        self.jsonl_file_path = jsonl_file_path
-        self.image_directory_path = image_directory_path
-        self.entries = self._load_entries()
-
-    def _load_entries(self) -> List[Dict[str, Any]]:
-        entries = []
-        with open(self.jsonl_file_path, 'r') as file:
-            for line in file:
-                data = json.loads(line)
-                entries.append(data)
-        return entries
-
-    def __len__(self) -> int:
-        return len(self.entries)
-
-    def __getitem__(self, idx: int) -> Tuple[Image.Image, Dict[str, Any]]:
-        if idx < 0 or idx >= len(self.entries):
-            raise IndexError("Index out of range")
-
-        entry = self.entries[idx]
-        image_path = os.path.join(self.image_directory_path, entry['image'])
-        try:
-            image = Image.open(image_path)
-            return (image, entry)
-        except FileNotFoundError:
-            raise FileNotFoundError(f"Image file {image_path} not found.")
-
-
-# forms a dataloader for a given dataset
-class DetectionDataset(Dataset):
-    def __init__(self, jsonl_file_path: str, image_directory_path: str):
-        self.dataset = JSONLDataset(jsonl_file_path, image_directory_path)
-
-    def __len__(self):
-        return len(self.dataset)
-
-    def __getitem__(self, idx):
-        image, data = self.dataset[idx]
-        prefix = data['prefix']  # prefix is the task
-        suffix = data['suffix']  # suffix is the annotations
-        return prefix, suffix, image
-
-
-BATCH_SIZE = 6  # batch size for training
-NUM_WORKERS = 0  # number of workers for data loading
-
-def collate_fn(batch):
-    questions, answers, images = zip(*batch)
-    inputs = processor(text=list(questions), images=list(images), return_tensors="pt", padding=True).to(DEVICE)
-    return inputs, answers
-
 # builds the dataloader for the training set
 train_dataset = DetectionDataset(
     jsonl_file_path = f"{OUTPUT_DIR}/train/annotations.jsonl",
@@ -513,7 +465,6 @@ def train_model(train_loader, val_loader, model, processor, epochs=10, lr=1e-6):
 
 
 
-EPOCHS = 10
 LR = 5e-6  # learning rate
 
 # runs the training loop to fine tune the model

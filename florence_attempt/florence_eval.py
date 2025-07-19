@@ -46,6 +46,12 @@ BATCH_SIZE = config.get('batch_size')
 NUM_WORKERS = config.get('num_workers')
 print("config loaded")
 
+# collates samples to form a batch of tensors
+# needed for dataloader
+def collate_fn(batch):
+    questions, answers, images = zip(*batch)
+    inputs = processor(text=list(questions), images=list(images), return_tensors="pt", padding=True).to(DEVICE)
+    return inputs, answers
 
 # builds the dataloader for the validation set
 val_dataset = DetectionDataset(

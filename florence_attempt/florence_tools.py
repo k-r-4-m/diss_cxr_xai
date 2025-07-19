@@ -78,14 +78,6 @@ class DetectionDataset(Dataset):
         suffix = data['suffix']  # suffix is the annotations
         return prefix, suffix, image
 
-
-# collates samples to form a batch of tensors
-# needed for dataloader
-def collate_fn(batch):
-    questions, answers, images = zip(*batch)
-    inputs = processor(text=list(questions), images=list(images), return_tensors="pt", padding=True).to(DEVICE)
-    return inputs, answers
-
 # loads the config.yaml file for model configuration
 def load_config(config_path):
     with open(config_path, 'r') as f:

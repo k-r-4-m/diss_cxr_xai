@@ -43,8 +43,15 @@ ANNOTATIONS_CSV = config.get('annotations_csv')
 OUTPUT_DIR = config.get('output_dir')
 BATCH_SIZE = config.get('batch_size')
 NUM_WORKERS = config.get('num_workers')
+USE_PEFT = config.get('use_peft')
 print("config loaded")
 
+# collates samples to form a batch of tensors
+# needed for dataloader
+def collate_fn(batch):
+    questions, answers, images = zip(*batch)
+    inputs = processor(text=list(questions), images=list(images), return_tensors="pt", padding=True).to(DEVICE)
+    return inputs, answers
 
 CHECKPOINT = "microsoft/Florence-2-base-ft"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -52,221 +59,6 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # loads the model and processor for florence-2
 model = AutoModelForCausalLM.from_pretrained(CHECKPOINT, trust_remote_code=True, revision=REVISION).to(DEVICE)
 processor = AutoProcessor.from_pretrained(CHECKPOINT, trust_remote_code=True, revision=REVISION)
-
-###-----prepares the data----###
-## not needed to run if the data is already preprocessed and ready for training
-
-# IMAGE_EXT = ".png"
-# TARGET_LONG_SIDE = 500
-
-# # gets the chest x-ray image from a DICOM file
-# def load_dicom_image(path, voi_lut=True, fix_monochrome=True):
-#     try:
-#         dicom = pydicom.dcmread(path)
-
-#         if voi_lut:
-#             data = apply_voi_lut(dicom.pixel_array, dicom)
-#         else:
-#             data = dicom.pixel_array
-
-#         if fix_monochrome and dicom.PhotometricInterpretation == "MONOCHROME1":
-#             data = np.amax(data) - data
-
-#     except:
-#         raise ValueError(f"File at {path} is not a valid DICOM file.")
-
-#     data = data - np.min(data)
-#     data = data / np.max(data)
-#     data = (data * 255).astype(np.uint8)
-
-#     # DICOM files are greyscale, need to convert to RGB
-#     return Image.fromarray(data).convert("RGB")
-
-# # resizes an image but keeps the aspect ratio
-# def resize_image_keep_aspect(image, target_long_side=500):
-#     w, h = image.size
-#     if w >= h:
-#         scale = target_long_side / w
-#         new_size = (target_long_side, int(h * scale))
-#     else:
-#         scale = target_long_side / h
-#         new_size = (int(w * scale), target_long_side)
-#     return image.resize(new_size), scale
-
-# # normalises bounding boxes so that they are values between 0 and 1000 (florence-2 requirement)
-# def normalise_bbox(x, y, w, h, image_w, image_h):
-#     return [
-#         int((x / image_w) * 1000),
-#         int((y / image_h) * 1000),
-#         int(((x + w) / image_w) * 1000),
-#         int(((y + h) / image_h) * 1000)
-#     ]
-
-# # adds <loc> tags to the bounding boxes (florence-2 requirement)
-# def encode_suffix(class_name, bbox):
-#     x_min, y_min, x_max, y_max = bbox
-#     return f"{class_name}<loc_{x_min}><loc_{y_min}><loc_{x_max}><loc_{y_max}>"
-
-
-# df = pd.read_csv(ANNOTATIONS_CSV)
-# df = df.dropna(subset=['x_min', 'y_min', 'x_max', 'y_max'])  # drop all rows with missing bounding boxes (i.e. no finding)
-# df['bbox'] = df[['x_min', 'y_min', 'x_max', 'y_max']].values.tolist()
-# df = df.drop(columns=['x_min', 'y_min', 'x_max', 'y_max'])
-
-# # group by image
-# grouped = df.groupby('image_id')
-
-# # train/val split
-# image_ids = df['image_id'].unique()
-# train_ids, val_ids = train_test_split(image_ids, test_size=0.2, random_state=42)
-# splits = {'train': train_ids, 'valid': val_ids}
-
-# # splits images into seperate folders and puts annotations into seperate jsonl files
-# for split_name, split_ids in splits.items():
-#     os.makedirs(os.path.join(OUTPUT_DIR, split_name), exist_ok=True)
-#     jsonl_path = os.path.join(OUTPUT_DIR, split_name, "annotations.jsonl")
-
-#     with open(jsonl_path, "w") as f_out:
-#         for image_id in tqdm(split_ids, desc=f"Processing {split_name}"):
-#             image_path = os.path.join(DICOM_DIR, f"{image_id}.dicom")
-#             if not os.path.exists(image_path):
-#                 continue
-
-#             image = load_dicom_image(image_path)
-#             original_w, original_h = image.size
-
-#             resized_image, scale = resize_image_keep_aspect(image, TARGET_LONG_SIDE)
-#             resized_w, resized_h = resized_image.size
-
-#             resized_path = os.path.join(OUTPUT_DIR, split_name, f"{image_id}{IMAGE_EXT}")
-#             resized_image.save(resized_path)
-
-#             try:
-#                 entries = grouped.get_group(image_id)
-#             except KeyError:
-#                 continue  # Image has no annotations
-
-#             suffix_parts = []
-#             for _, row in entries.iterrows():
-#                 x_min, y_min, x_max, y_max = row['bbox']
-#                 x_min *= scale
-#                 y_min *= scale
-#                 x_max *= scale
-#                 y_max *= scale
-#                 box_norm = normalise_bbox(
-#                     x=x_min,
-#                     y=y_min,
-#                     w=x_max - x_min,
-#                     h=y_max - y_min,
-#                     image_w=resized_w,
-#                     image_h=resized_h
-#                 )
-#                 suffix_parts.append(encode_suffix(row['class_name'], box_norm))
-
-#             json_entry = {
-#                 "image": f"{image_id}{IMAGE_EXT}",
-#                 "prefix": "<OD>",
-#                 "suffix": " ".join(suffix_parts)
-#             }
-#             f_out.write(json.dumps(json_entry) + "\n")
-
-# from PIL import Image
-# import os
-
-# # Set your image directory
-# image_dir = 'E:/vinbigdata_xrays/output_dataset/train'
-
-# min_size = (10000, 10000)
-# min_path = None
-# max_size = (0, 0)
-# max_path = None
-
-# # Loop through all files in the directory
-# for filename in os.listdir(image_dir):
-#     if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff')):
-#         image_path = os.path.join(image_dir, filename)
-#         try:
-#             with Image.open(image_path) as img:
-#                 if img.size < min_size:
-#                     min_size = img.size
-#                     min_path = image_path
-
-#                 if img.size > max_size:
-#                     max_size = img.size
-#                     max_path = image_path
-
-#         except Exception as e:
-#             print(f"Error opening {filename}: {e}")
-
-# print(min_size)
-# print(min_path)
-# print(max_size)
-# print(max_path)
-# ## calculates the intersection over union of different radiologist annotations when they annotate the same label
-
-# import pandas as pd
-# import itertools
-# import numpy as np
-
-# def compute_iou(box1, box2):
-#     """
-#     box format: (x_min, y_min, x_max, y_max)
-#     """
-#     xA = max(box1[0], box2[0])
-#     yA = max(box1[1], box2[1])
-#     xB = min(box1[2], box2[2])
-#     yB = min(box1[3], box2[3])
-
-#     inter_area = max(0, xB - xA) * max(0, yB - yA)
-#     if inter_area == 0:
-#         return 0.0
-
-#     box1_area = (box1[2] - box1[0]) * (box1[3] - box1[1])
-#     box2_area = (box2[2] - box2[0]) * (box2[3] - box2[1])
-#     union_area = box1_area + box2_area - inter_area
-
-#     return inter_area / union_area
-
-# def analyse_duplicate_ious(csv_path):
-#     df = pd.read_csv(csv_path)
-
-#     # filter out no finding
-#     df = df[df["class_name"].str.lower() != "no finding"]
-
-#     # group by image and class_name
-#     grouped = df.groupby(["image_id", "class_name"])
-
-#     results = []
-
-#     for (image_id, class_name), group in grouped:
-#         if len(group) < 2:
-#             continue  # no dupes
-
-#         # get all boxes for the group
-#         boxes = group[["x_min", "y_min", "x_max", "y_max"]].values
-
-#         ious = []
-#         for box1, box2 in itertools.combinations(boxes, 2):
-#             iou = compute_iou(box1, box2)
-#             ious.append(iou)
-
-#         if ious:
-#             results.append({
-#                 "image_id": image_id,
-#                 "class_name": class_name,
-#                 "num_annotations": len(boxes),
-#                 "min_iou": np.min(ious),
-#                 "max_iou": np.max(ious),
-#                 "avg_iou": np.mean(ious)
-#             })
-
-#     return pd.DataFrame(results)
-
-
-# results_df = analyse_duplicate_ious(ANNOTATIONS_CSV)
-# print(results_df["min_iou"].mean())
-# print(results_df["max_iou"].mean())
-# print(results_df["avg_iou"].mean())
 
 # builds the dataloader for the training set
 train_dataset = DetectionDataset(
@@ -283,76 +75,27 @@ val_dataset = DetectionDataset(
 train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, collate_fn=collate_fn, num_workers=NUM_WORKERS, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, collate_fn=collate_fn, num_workers=NUM_WORKERS)
 
-# specifies the configuration for LoRa
-config = LoraConfig(
-    r=32,  # previously 8
-    lora_alpha=8,
-    target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "linear", "Conv2d", "lm_head", "fc2"],
-    task_type="CAUSAL_LM",
-    lora_dropout=0.05,
-    bias="none",
-    inference_mode=False,
-    use_rslora=True,
-    init_lora_weights="gaussian",
-    revision=REVISION
-)
+# if using peft to reduce number of trainable parameters
+if USE_PEFT:
+    print("using peft")
+    # specifies the configuration for LoRa
+    config = LoraConfig(
+        r=config.get('lora_r'),
+        lora_alpha=config.get('lora_alpha'),
+        target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "linear", "Conv2d", "lm_head", "fc2"],
+        task_type="CAUSAL_LM",
+        lora_dropout=0.05,
+        bias="none",
+        inference_mode=False,
+        use_rslora=True,
+        init_lora_weights="gaussian",
+        revision=REVISION
+    )
 
-# peft_model = get_peft_model(model, config)
-# peft_model.print_trainable_parameters()
-
-## removing peft
-peft_model = model
+    model = get_peft_model(model, config)
+    model.print_trainable_parameters()
 
 torch.cuda.empty_cache()
-
-# @title Run inference with pre-trained Florence-2 model on validation dataset
-
-
-# def render_inline(image: Image.Image, resize=(128, 128)):
-#     """Convert image into inline html."""
-#     image.resize(resize)
-#     with io.BytesIO() as buffer:
-#         image.save(buffer, format='jpeg')
-#         image_b64 = str(base64.b64encode(buffer.getvalue()), "utf-8")
-#         return f"data:image/jpeg;base64,{image_b64}"
-
-
-# def render_example(image: Image.Image, response):
-#     try:
-#         detections = sv.Detections.from_lmm(sv.LMM.FLORENCE_2, response, resolution_wh=image.size)
-#         image = sv.BoxAnnotator(color_lookup=sv.ColorLookup.INDEX).annotate(image.copy(), detections)
-#         image = sv.LabelAnnotator(color_lookup=sv.ColorLookup.INDEX).annotate(image, detections)
-#     except:
-#         print('failed to render model response')
-#     return f"""
-# <div style="display: inline-flex; align-items: center; justify-content: center;">
-#     <img style="width:256px; height:256px;" src="{render_inline(image, resize=(128, 128))}" />
-#     <p style="width:512px; margin:10px; font-size:small;">{html.escape(json.dumps(response))}</p>
-# </div>
-# """
-
-
-# def render_inference_results(model, dataset: DetectionDataset, count: int):
-#     html_out = ""
-#     count = min(count, len(dataset))
-#     for i in range(count):
-#         image, data = dataset.dataset[i]
-#         prefix = data['prefix']
-#         suffix = data['suffix']
-#         inputs = processor(text=prefix, images=image, return_tensors="pt").to(DEVICE)
-#         generated_ids = model.generate(
-#             input_ids=inputs["input_ids"],
-#             pixel_values=inputs["pixel_values"],
-#             max_new_tokens=1024,
-#             num_beams=1
-#         )
-#         generated_text = processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
-#         answer = processor.post_process_generation(generated_text, task='<OD>', image_size=image.size)
-#         html_out += render_example(image, answer)
-
-#     display(HTML(html_out))
-
-# render_inference_results(peft_model, val_dataset, 4)
 
 # saves the inference results as a jpg to track how the model is doing over time
 def save_inference_results(model, dataset: DetectionDataset, count: int, save_dir: str, epoch="none"):
@@ -381,14 +124,14 @@ def save_inference_results(model, dataset: DetectionDataset, count: int, save_di
             
             # saves example images of annotations
             filename = f"epoch{epoch}_{i:03d}_{detections.data['class_name']}.jpg".replace(" ", "_")
-            filename = sanitize_filename(filename, platform="windows")   # cleans filename to make sure it gets saved
+            filename = sanitize_filename(filename)   # cleans filename to make sure it gets saved
             filepath = os.path.join(save_dir, filename)
             image_annotated.save(filepath)
             print(f"Saved: {filepath}")
         except Exception as e:
             print(f"Failed to annotate image {i}: {e}")
 
-save_inference_results(peft_model, val_dataset, 4, save_dir="./before_training")
+save_inference_results(model, val_dataset, 4, save_dir="./before_training")
 
 
 ## Fine-tune Florence-2 on custom object detection dataset
@@ -404,7 +147,7 @@ def train_model(train_loader, val_loader, model, processor, epochs=10, lr=1e-6):
         num_training_steps=num_training_steps,
     )
 
-    # save_inference_results(peft_model, val_loader.dataset, 6, save_dir="./inference_training")
+    # save_inference_results(model, val_loader.dataset, 6, save_dir="./inference_training")
 
     # runs model for given number of epochs
     for epoch in range(epochs):
@@ -456,7 +199,7 @@ def train_model(train_loader, val_loader, model, processor, epochs=10, lr=1e-6):
             avg_val_loss = val_loss / len(val_loader)
             print(f"Average Validation Loss: {avg_val_loss}")
 
-            save_inference_results(peft_model, val_loader.dataset, 6, save_dir="./training_images_annotated", epoch=str(epoch))
+            save_inference_results(model, val_loader.dataset, 6, save_dir="./training_images_annotated", epoch=str(epoch))
 
         output_dir = f"./model_checkpoints/epoch_{epoch+1}"
         os.makedirs(output_dir, exist_ok=True)
@@ -468,7 +211,7 @@ def train_model(train_loader, val_loader, model, processor, epochs=10, lr=1e-6):
 LR = 5e-6  # learning rate
 
 # runs the training loop to fine tune the model
-train_model(train_loader, val_loader, peft_model, processor, epochs=EPOCHS, lr=LR)
+train_model(train_loader, val_loader, model, processor, epochs=EPOCHS, lr=LR)
 
 ## Fine-tuned model evaluation
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")

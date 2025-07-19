@@ -5,3 +5,7 @@ revision: 'refs/pr/24'  # revision of florence-2 that fixes the GenerationMixin 
 annotations_csv: './train_original.csv'
 output_dir: './output_dataset/'
 dicom_dir: './dicom/'
+use_peft: True
+
+lora_r: 32
+lora_alpha: 16

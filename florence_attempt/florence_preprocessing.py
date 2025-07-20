@@ -16,6 +16,7 @@ from tqdm import tqdm
 # from IPython.core.display import HTML
 from datetime import datetime
 from pathvalidate import sanitize_filename
+from florence_tools import *
 import io
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -31,9 +32,14 @@ import html
 import base64
 import itertools
 
-DICOM_DIR = "./dicom/"
-ANNOTATIONS_CSV = "./train_original.csv"
-OUTPUT_DIR = "./output_dataset/"
+# loads the config file for epochs, revision, pathnames, etc.
+config_path = "./config.yaml"
+config = load_config(config_path)
+
+DICOM_DIR = config.get('dicom_dir')
+ANNOTATIONS_CSV = config.get('annotations_csv')
+OUTPUT_DIR = config.get('output_dir')
+print("config loaded")
 
 IMAGE_EXT = ".png"
 TARGET_LONG_SIDE = 1500

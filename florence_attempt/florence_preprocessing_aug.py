@@ -48,11 +48,12 @@ TARGET_LONG_SIDE = 1500
 AUGMENTATION_CONFIG = {
     'brightness_range': (0.7, 1.3),
     'contrast_range': (0.7, 1.3),
-    'zoom_range': (0.5, 1.5),
+    'zoom_range': (1.1, 1.5),
 }
 
-# Target samples per class (set this based on your needs)
-TARGET_SAMPLES_PER_CLASS = 7162
+# target number of samples for each class
+# set to the current majority class (aortic enlargement with 3057 samples)
+TARGET_SAMPLES_PER_CLASS = 3057
 
 # gets the chest x-ray image from a DICOM file
 def load_dicom_image(path, voi_lut=True, fix_monochrome=True):
@@ -124,11 +125,8 @@ def apply_zoom_to_bbox(bbox, zoom_factor, image_center):
     
     return [new_x_min, new_y_min, new_x_max, new_y_max]
 
+# applies augmentations to an image and the corresponding bounding boxes
 def augment_image_and_bboxes(image, bboxes, config=AUGMENTATION_CONFIG):
-    """
-    Apply augmentations to image and corresponding bounding boxes
-    Returns augmented image and transformed bounding boxes
-    """
     augmented_image = image.copy()
     augmented_bboxes = bboxes.copy()
     
@@ -172,13 +170,123 @@ def augment_image_and_bboxes(image, bboxes, config=AUGMENTATION_CONFIG):
     
     return augmented_image, augmented_bboxes
 
+# calculates the IoU of two bounding boxes
+def calculate_iou(box1, box2):
+    x1_min, y1_min, x1_max, y1_max = box1
+    x2_min, y2_min, x2_max, y2_max = box2
+    
+    # calc intersection
+    inter_x_min = max(x1_min, x2_min)
+    inter_y_min = max(y1_min, y2_min)
+    inter_x_max = min(x1_max, x2_max)
+    inter_y_max = min(y1_max, y2_max)
+    
+    if inter_x_max <= inter_x_min or inter_y_max <= inter_y_min:
+        return 0.0
+    
+    inter_area = (inter_x_max - inter_x_min) * (inter_y_max - inter_y_min)
+    
+    # calc union
+    area1 = (x1_max - x1_min) * (y1_max - y1_min)
+    area2 = (x2_max - x2_min) * (y2_max - y2_min)
+    union_area = area1 + area2 - inter_area
+    
+    return inter_area / union_area if union_area > 0 else 0.0
+
+# applies majority voting for dupe/overlapping annotations
+# consoldiates the annotations to be the mean bounding box
+def apply_majority_voting(annotations, iou_threshold=0.5):
+    if not annotations:
+        return []
+    
+    # group annotations by class name
+    class_groups = {}
+    for ann in annotations:
+        class_name = ann['class_name']
+        if class_name not in class_groups:
+            class_groups[class_name] = []
+        class_groups[class_name].append(ann)
+    
+    consolidated = []
+    
+    for class_name, class_annotations in class_groups.items():
+        if len(class_annotations) == 1:
+            # only one annotation for this class, keep it
+            consolidated.append(class_annotations[0])
+        else:
+            # multiple annotations for same class
+            # apply majority voting
+            clusters = []
+            
+            for ann in class_annotations:
+                bbox = ann['bbox']
+                placed = False
+                
+                # try to place in existing cluster
+                for cluster in clusters:
+                    # check if the annotation overlaps enough with a cluster given the IoU threshold
+                    cluster_ious = [calculate_iou(bbox, existing_ann['bbox']) 
+                                  for existing_ann in cluster]
+                    if any(iou >= iou_threshold for iou in cluster_ious):
+                        cluster.append(ann)
+                        placed = True
+                        break
+                
+                if not placed:
+                    # creates a new cluster
+                    clusters.append([ann])
+            
+            # for each cluster, create a consoldiated annotation using the mean bounding boxes
+            for cluster in clusters:
+                if len(cluster) == 1:
+                    consolidated.append(cluster[0])
+                else:
+                    # calc mean bounding box
+                    mean_bbox = [
+                        np.mean([ann['bbox'][0] for ann in cluster]),  # x_min
+                        np.mean([ann['bbox'][1] for ann in cluster]),  # y_min
+                        np.mean([ann['bbox'][2] for ann in cluster]),  # x_max
+                        np.mean([ann['bbox'][3] for ann in cluster])   # y_max
+                    ]
+                    
+                    consolidated_ann = {
+                        'class_name': class_name,
+                        'bbox': mean_bbox
+                    }
+                    consolidated.append(consolidated_ann)
+    
+    return consolidated
+
+# processes all annotations for a single image using the majority voting
+def process_image_annotations(entries):
+    # convert dataframe rows to annotation dicts
+    annotations = []
+    for _, row in entries.iterrows():
+        annotations.append({
+            'class_name': row['class_name'],
+            'bbox': row['bbox']
+        })
+    
+    # apply majority voting
+    consolidated_annotations = apply_majority_voting(annotations)
+    
+    return consolidated_annotations
+
 # calculates the distribution of classes in the dataset
 def calculate_class_distribution(df):
-    class_counts = df['class_name'].value_counts()
-    print("Current class distribution: ")
-    for class_name, count in class_counts.items():
+    # group by image and apply majority voting to get actual distribution
+    grouped = df.groupby('image_id')
+    class_counts = Counter()
+    
+    for image_id, entries in grouped:
+        consolidated = process_image_annotations(entries)
+        for ann in consolidated:
+            class_counts[ann['class_name']] += 1
+    
+    print("Current class distribution (after majority voting):")
+    for class_name, count in class_counts.most_common():
         print(f"  {class_name}: {count}")
-    return class_counts
+    return dict(class_counts)
 
 # calculates how many augmented samples that are needed for each class
 def calculate_augmentation_needs(class_counts, target_samples=TARGET_SAMPLES_PER_CLASS):
@@ -204,7 +312,6 @@ print("\nAugmentation plan:")
 for class_name, needed in augmentation_needs.items():
     print(f"  {class_name}: +{needed} samples")
 
-# group by image
 grouped = df.groupby('image_id')
 
 # train/val split
@@ -212,7 +319,9 @@ image_ids = df['image_id'].unique()
 train_ids, val_ids = train_test_split(image_ids, test_size=0.2, random_state=42)
 splits = {'train': train_ids, 'valid': val_ids}
 
-# splits images into seperate folders and puts annotations into seperate jsonl files
+# track final class counts across all splits
+final_class_counts = {'train': {}, 'valid': {}}
+
 for split_name, split_ids in splits.items():
     os.makedirs(os.path.join(OUTPUT_DIR, split_name), exist_ok=True)
     jsonl_path = os.path.join(OUTPUT_DIR, split_name, "annotations.jsonl")
@@ -222,7 +331,7 @@ for split_name, split_ids in splits.items():
     split_augmentation_tracker = {class_name: 0 for class_name in augmentation_needs.keys()}
     
     with open(jsonl_path, "w") as f_out:
-        # makes a first pass and processes original images
+        # makes a first pass, processing the original images
         print(f"\nProcessing original {split_name} images...")
         for image_id in tqdm(split_ids, desc=f"Original {split_name}"):
             image_path = os.path.join(DICOM_DIR, f"{image_id}.dicom")
@@ -243,26 +352,27 @@ for split_name, split_ids in splits.items():
             except KeyError:
                 continue
             
-            # track class counts in this split
-            for _, row in entries.iterrows():
-                class_name = row['class_name']
-                split_class_counts[class_name] = split_class_counts.get(class_name, 0) + 1
+            # process annotations with majority voting
+            consolidated_annotations = process_image_annotations(entries)
             
-            # process bounding boxes
+            if not consolidated_annotations:
+                continue
+            
+            # process consolidated bounding boxes
             suffix_parts = []
-            bboxes_for_aug = []
-            class_names_for_aug = []
             
-            for _, row in entries.iterrows():
-                x_min, y_min, x_max, y_max = row['bbox']
+            for ann in consolidated_annotations:
+                class_name = ann['class_name']
+                x_min, y_min, x_max, y_max = ann['bbox']
+                
+                # apply scaling
                 x_min *= scale
                 y_min *= scale
                 x_max *= scale
                 y_max *= scale
                 
-                bbox_scaled = [x_min, y_min, x_max, y_max]
-                bboxes_for_aug.append(bbox_scaled)
-                class_names_for_aug.append(row['class_name'])
+                # track class counts in this split
+                split_class_counts[class_name] = split_class_counts.get(class_name, 0) + 1
                 
                 box_norm = normalise_bbox(
                     x=x_min,
@@ -272,7 +382,7 @@ for split_name, split_ids in splits.items():
                     image_w=resized_w,
                     image_h=resized_h
                 )
-                suffix_parts.append(encode_suffix(row['class_name'], box_norm))
+                suffix_parts.append(encode_suffix(class_name, box_norm))
             
             json_entry = {
                 "image": f"{image_id}{IMAGE_EXT}",
@@ -281,24 +391,25 @@ for split_name, split_ids in splits.items():
             }
             f_out.write(json.dumps(json_entry) + "\n")
         
-        # makes a second pass, generating augmented images
-        # done only for training split
+        # makes a second pass, generate augmented images
+        # only done for training split
         if split_name == 'train':
             print(f"\nGenerating augmented {split_name} images...")
             
-            # create list of images that contain underrepresented classes
+            # creates a list of images that contain underrepresented classes
             augmentation_candidates = []
             for image_id in split_ids:
                 try:
                     entries = grouped.get_group(image_id)
-                    for _, row in entries.iterrows():
-                        if row['class_name'] in augmentation_needs:
+                    consolidated = process_image_annotations(entries)
+                    for ann in consolidated:
+                        if ann['class_name'] in augmentation_needs:
                             augmentation_candidates.append(image_id)
                             break
                 except KeyError:
                     continue
             
-            augmentation_candidates = list(set(augmentation_candidates))  # remove duplicates
+            augmentation_candidates = list(set(augmentation_candidates))  # remove dupes
             
             aug_counter = 0
             while any(split_augmentation_tracker[cls] < augmentation_needs[cls] 
@@ -311,13 +422,14 @@ for split_name, split_ids in splits.items():
                     
                     try:
                         entries = grouped.get_group(image_id)
+                        consolidated_annotations = process_image_annotations(entries)
                     except KeyError:
                         continue
                     
-                    # check if this image contains classes that still need augmentation
+                    # check if this image has any classes that still need augmentation
                     needs_aug = False
-                    for _, row in entries.iterrows():
-                        class_name = row['class_name']
+                    for ann in consolidated_annotations:
+                        class_name = ann['class_name']
                         if (class_name in augmentation_needs and 
                             split_augmentation_tracker[class_name] < augmentation_needs[class_name]):
                             needs_aug = True
@@ -326,35 +438,36 @@ for split_name, split_ids in splits.items():
                     if not needs_aug:
                         continue
                     
-                    # load and process image
+                    # load and process this image
                     image = load_dicom_image(image_path)
                     resized_image, scale = resize_image_keep_aspect(image, TARGET_LONG_SIDE)
                     resized_w, resized_h = resized_image.size
                     
-                    # prepare bounding boxes for augmentation
+                    # prepare bounding boxes for augmenting
                     bboxes_for_aug = []
                     class_names_for_aug = []
-                    for _, row in entries.iterrows():
-                        x_min, y_min, x_max, y_max = row['bbox']
+                    
+                    for ann in consolidated_annotations:
+                        x_min, y_min, x_max, y_max = ann['bbox']
                         x_min *= scale
                         y_min *= scale
                         x_max *= scale
                         y_max *= scale
                         bboxes_for_aug.append([x_min, y_min, x_max, y_max])
-                        class_names_for_aug.append(row['class_name'])
-                    
+                        class_names_for_aug.append(ann['class_name'])
+
                     # apply augmentation
                     aug_image, aug_bboxes = augment_image_and_bboxes(
                         resized_image, bboxes_for_aug, AUGMENTATION_CONFIG
                     )
                     
-                    # save augmented image
+                    # saves the augmented image
                     aug_counter += 1
                     aug_image_name = f"{image_id}_aug_{aug_counter:04d}{IMAGE_EXT}"
                     aug_image_path = os.path.join(OUTPUT_DIR, split_name, aug_image_name)
                     aug_image.save(aug_image_path)
                     
-                    # process augmented bounding boxes
+                    # process the augmented bounding boxes
                     suffix_parts = []
                     for i, (bbox, class_name) in enumerate(zip(aug_bboxes, class_names_for_aug)):
                         x_min, y_min, x_max, y_max = bbox
@@ -383,25 +496,70 @@ for split_name, split_ids in splits.items():
                         if class_name in split_augmentation_tracker:
                             split_augmentation_tracker[class_name] += 1
                     
-                    # write augmented annotation
-                    json_entry = {
-                        "image": aug_image_name,
-                        "prefix": "<OD>",
-                        "suffix": " ".join(suffix_parts)
-                    }
-                    f_out.write(json.dumps(json_entry) + "\n")
+                    # write the augmented annotation
+                    if suffix_parts:
+                        json_entry = {
+                            "image": aug_image_name,
+                            "prefix": "<OD>",
+                            "suffix": " ".join(suffix_parts)
+                        }
+                        f_out.write(json.dumps(json_entry) + "\n")
                     
-                    # break if we've generated enough augmented samples
+                    # break if generated enough augmented samples
                     if all(split_augmentation_tracker[cls] >= augmentation_needs[cls] 
                             for cls in augmentation_needs.keys()):
                         break
                 
-                # safety break to prevent infinite loop
+                # safety break
+                # prevents infinite loop
                 if aug_counter > len(split_ids) * 10:
-                    print(f"Warning: Reached maximum augmentation attempts for {split_name}")
+                    print(f"Warning: reached maximum augmentation attempts for {split_name}")
                     break
             
             print(f"Generated {aug_counter} augmented samples for {split_name}")
-            print("Final augmentation counts:")
+            print("Augmentation counts for this split:")
             for class_name, count in split_augmentation_tracker.items():
                 print(f"  {class_name}: +{count}")
+    
+    # store final counts for this split
+    final_class_counts[split_name] = split_class_counts.copy()
+    
+    # add augmented counts to final counts for training split
+    if split_name == 'train':
+        for class_name, aug_count in split_augmentation_tracker.items():
+            if class_name in final_class_counts[split_name]:
+                final_class_counts[split_name][class_name] += aug_count
+
+# print final stats
+print("\n" + "="*50)
+print("FINAL CLASS DISTRIBUTION SUMMARY")
+print("="*50)
+
+for split_name in ['train', 'valid']:
+    print(f"\n{split_name.upper()} SET:")
+    split_counts = final_class_counts[split_name]
+    if split_counts:
+        total_samples = sum(split_counts.values())
+        print(f"Total images with annotations: {total_samples}")
+        for class_name, count in sorted(split_counts.items()):
+            percentage = (count / total_samples) * 100
+            print(f"  {class_name}: {count} ({percentage:.1f}%)")
+    else:
+        print("  No annotations found")
+
+# combined stats
+all_classes = set()
+for split_counts in final_class_counts.values():
+    all_classes.update(split_counts.keys())
+
+print(f"\nCOMBINED STATISTICS:")
+combined_counts = {}
+for class_name in all_classes:
+    total = sum(split_counts.get(class_name, 0) for split_counts in final_class_counts.values())
+    combined_counts[class_name] = total
+
+total_combined = sum(combined_counts.values())
+print(f"Total images with annotations: {total_combined}")
+for class_name, count in sorted(combined_counts.items()):
+    percentage = (count / total_combined) * 100
+    print(f"  {class_name}: {count} ({percentage:.1f}%)")

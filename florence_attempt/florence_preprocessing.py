@@ -131,32 +131,8 @@ for split_name, split_ids in splits.items():
             except KeyError:
                 continue  # Image has no annotations
 
-            suffix_parts = []
-            for _, row in entries.iterrows():
-                x_min, y_min, x_max, y_max = row['bbox']
-                x_min *= scale
-                y_min *= scale
-                x_max *= scale
-                y_max *= scale
-                box_norm = normalise_bbox(
-                    x=x_min,
-                    y=y_min,
-                    w=x_max - x_min,
-                    h=y_max - y_min,
-                    image_w=resized_w,
-                    image_h=resized_h
-                )
-                suffix_parts.append(encode_suffix(row['class_name'], box_norm))
-
-            # ## trying no duplicate annotations
             # suffix_parts = []
-            # seen_classes = set()  # uses a set to ensure no duplicate annotations
             # for _, row in entries.iterrows():
-            #     class_name = row['class_name']
-            #     if class_name in seen_classes:
-            #         continue  # skip duplicate class for this image
-            #     seen_classes.add(class_name)
-
             #     x_min, y_min, x_max, y_max = row['bbox']
             #     x_min *= scale
             #     y_min *= scale
@@ -170,7 +146,31 @@ for split_name, split_ids in splits.items():
             #         image_w=resized_w,
             #         image_h=resized_h
             #     )
-            #     suffix_parts.append(encode_suffix(class_name, box_norm))
+            #     suffix_parts.append(encode_suffix(row['class_name'], box_norm))
+
+            ## trying no duplicate annotations
+            suffix_parts = []
+            seen_classes = set()  # uses a set to ensure no duplicate annotations
+            for _, row in entries.iterrows():
+                class_name = row['class_name']
+                if class_name in seen_classes:
+                    continue  # skip duplicate class for this image
+                seen_classes.add(class_name)
+
+                x_min, y_min, x_max, y_max = row['bbox']
+                x_min *= scale
+                y_min *= scale
+                x_max *= scale
+                y_max *= scale
+                box_norm = normalise_bbox(
+                    x=x_min,
+                    y=y_min,
+                    w=x_max - x_min,
+                    h=y_max - y_min,
+                    image_w=resized_w,
+                    image_h=resized_h
+                )
+                suffix_parts.append(encode_suffix(class_name, box_norm))
 
             json_entry = {
                 "image": f"{image_id}{IMAGE_EXT}",

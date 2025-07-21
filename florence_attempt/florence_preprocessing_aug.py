@@ -304,13 +304,13 @@ df = df.dropna(subset=['x_min', 'y_min', 'x_max', 'y_max'])  # drop all rows wit
 df['bbox'] = df[['x_min', 'y_min', 'x_max', 'y_max']].values.tolist()
 df = df.drop(columns=['x_min', 'y_min', 'x_max', 'y_max'])
 
-# analyses class distribution
+# analyses class distribution before train/val split
+print("Analyzing global class distribution...")
 class_counts = calculate_class_distribution(df)
-augmentation_needs = calculate_augmentation_needs(class_counts)
 
-print("\nAugmentation plan:")
-for class_name, needed in augmentation_needs.items():
-    print(f"  {class_name}: +{needed} samples")
+# uses the majority class
+TARGET_SAMPLES_PER_CLASS = max(class_counts.values())  # should be 4046
+print(f"Target samples per class: {TARGET_SAMPLES_PER_CLASS}")
 
 grouped = df.groupby('image_id')
 
@@ -319,6 +319,35 @@ image_ids = df['image_id'].unique()
 train_ids, val_ids = train_test_split(image_ids, test_size=0.2, random_state=42)
 splits = {'train': train_ids, 'valid': val_ids}
 
+# calculates class distribution per split
+split_class_counts = {'train': {}, 'valid': {}}
+for split_name, split_ids in splits.items():
+    print(f"\nAnalyzing {split_name} class distribution...")
+    for image_id in split_ids:
+        try:
+            entries = grouped.get_group(image_id)
+            consolidated = process_image_annotations(entries)
+            for ann in consolidated:
+                class_name = ann['class_name']
+                split_class_counts[split_name][class_name] = split_class_counts[split_name].get(class_name, 0) + 1
+        except KeyError:
+            continue
+    
+    print(f"{split_name.upper()} class counts:")
+    for class_name, count in sorted(split_class_counts[split_name].items()):
+        print(f"  {class_name}: {count}")
+
+# calculates augmentation needs based on training set
+train_augmentation_needs = {}
+for class_name, current_count in split_class_counts['train'].items():
+    target_for_train = int(TARGET_SAMPLES_PER_CLASS * 0.8)  # 80% of target goes to train
+    if current_count < target_for_train:
+        train_augmentation_needs[class_name] = target_for_train - current_count
+
+print(f"\nAugmentation plan for training set (target: {int(TARGET_SAMPLES_PER_CLASS * 0.8)}):")
+for class_name, needed in train_augmentation_needs.items():
+    print(f"  {class_name}: +{needed} samples")
+
 # track final class counts across all splits
 final_class_counts = {'train': {}, 'valid': {}}
 
@@ -326,12 +355,11 @@ for split_name, split_ids in splits.items():
     os.makedirs(os.path.join(OUTPUT_DIR, split_name), exist_ok=True)
     jsonl_path = os.path.join(OUTPUT_DIR, split_name, "annotations.jsonl")
     
-    # track augmentation counts for this split
-    split_class_counts = {}
-    split_augmentation_tracker = {class_name: 0 for class_name in augmentation_needs.keys()}
+    # initialize split class counts
+    final_class_counts[split_name] = split_class_counts[split_name].copy()
     
     with open(jsonl_path, "w") as f_out:
-        # makes a first pass, processing the original images
+        # makes a first pass and processes the original images
         print(f"\nProcessing original {split_name} images...")
         for image_id in tqdm(split_ids, desc=f"Original {split_name}"):
             image_path = os.path.join(DICOM_DIR, f"{image_id}.dicom")
@@ -371,9 +399,6 @@ for split_name, split_ids in splits.items():
                 x_max *= scale
                 y_max *= scale
                 
-                # track class counts in this split
-                split_class_counts[class_name] = split_class_counts.get(class_name, 0) + 1
-                
                 box_norm = normalise_bbox(
                     x=x_min,
                     y=y_min,
@@ -391,31 +416,58 @@ for split_name, split_ids in splits.items():
             }
             f_out.write(json.dumps(json_entry) + "\n")
         
-        # makes a second pass, generate augmented images
-        # only done for training split
-        if split_name == 'train':
+        # makes a second pass, generating augmented images
+        if split_name == 'train' and train_augmentation_needs:
             print(f"\nGenerating augmented {split_name} images...")
             
-            # creates a list of images that contain underrepresented classes
+            # creates weighted list of images for augmentation based on class needs
             augmentation_candidates = []
+            candidate_weights = {}
+            
             for image_id in split_ids:
                 try:
                     entries = grouped.get_group(image_id)
                     consolidated = process_image_annotations(entries)
+                    
+                    # calculate weight based on how many underrepresented classes this image contains
+                    weight = 0
+                    classes_in_image = []
                     for ann in consolidated:
-                        if ann['class_name'] in augmentation_needs:
-                            augmentation_candidates.append(image_id)
-                            break
+                        class_name = ann['class_name']
+                        if class_name in train_augmentation_needs:
+                            weight += train_augmentation_needs[class_name]
+                            classes_in_image.append(class_name)
+                    
+                    if weight > 0:
+                        augmentation_candidates.append(image_id)
+                        candidate_weights[image_id] = (weight, classes_in_image)
+                        
                 except KeyError:
                     continue
             
-            augmentation_candidates = list(set(augmentation_candidates))  # remove dupes
+            # sort candidates by weight (prioritize images with most needed classes)
+            augmentation_candidates.sort(key=lambda x: candidate_weights[x][0], reverse=True)
             
+            print(f"Found {len(augmentation_candidates)} candidate images for augmentation")
+            
+            # track how many samples we still need per class
+            remaining_needs = train_augmentation_needs.copy()
             aug_counter = 0
-            while any(split_augmentation_tracker[cls] < augmentation_needs[cls] 
-                        for cls in augmentation_needs.keys()):
-                
+            max_attempts = len(augmentation_candidates) * 20  # prevents infinite loops
+            attempt = 0
+            
+            while any(remaining_needs.values()) and attempt < max_attempts:
                 for image_id in augmentation_candidates:
+                    if not any(remaining_needs.values()):
+                        break
+                    
+                    attempt += 1
+                    
+                    # check if this image still has classes we need
+                    _, classes_in_image = candidate_weights[image_id]
+                    if not any(remaining_needs.get(cls, 0) > 0 for cls in classes_in_image):
+                        continue
+                    
                     image_path = os.path.join(DICOM_DIR, f"{image_id}.dicom")
                     if not os.path.exists(image_path):
                         continue
@@ -426,24 +478,12 @@ for split_name, split_ids in splits.items():
                     except KeyError:
                         continue
                     
-                    # check if this image has any classes that still need augmentation
-                    needs_aug = False
-                    for ann in consolidated_annotations:
-                        class_name = ann['class_name']
-                        if (class_name in augmentation_needs and 
-                            split_augmentation_tracker[class_name] < augmentation_needs[class_name]):
-                            needs_aug = True
-                            break
-                    
-                    if not needs_aug:
-                        continue
-                    
-                    # load and process this image
+                    # load and process image
                     image = load_dicom_image(image_path)
                     resized_image, scale = resize_image_keep_aspect(image, TARGET_LONG_SIDE)
                     resized_w, resized_h = resized_image.size
                     
-                    # prepare bounding boxes for augmenting
+                    # prepares bounding boxes for augmentation
                     bboxes_for_aug = []
                     class_names_for_aug = []
                     
@@ -456,19 +496,21 @@ for split_name, split_ids in splits.items():
                         bboxes_for_aug.append([x_min, y_min, x_max, y_max])
                         class_names_for_aug.append(ann['class_name'])
 
-                    # apply augmentation
+                    # applies augmentation
                     aug_image, aug_bboxes = augment_image_and_bboxes(
                         resized_image, bboxes_for_aug, AUGMENTATION_CONFIG
                     )
                     
-                    # saves the augmented image
+                    # saves augmented image
                     aug_counter += 1
                     aug_image_name = f"{image_id}_aug_{aug_counter:04d}{IMAGE_EXT}"
                     aug_image_path = os.path.join(OUTPUT_DIR, split_name, aug_image_name)
                     aug_image.save(aug_image_path)
                     
-                    # process the augmented bounding boxes
+                    # processes augmented bounding boxes and update counts
                     suffix_parts = []
+                    classes_added_this_aug = []
+                    
                     for i, (bbox, class_name) in enumerate(zip(aug_bboxes, class_names_for_aug)):
                         x_min, y_min, x_max, y_max = bbox
                         
@@ -491,12 +533,9 @@ for split_name, split_ids in splits.items():
                             image_h=resized_h
                         )
                         suffix_parts.append(encode_suffix(class_name, box_norm))
-                        
-                        # update augmentation tracker
-                        if class_name in split_augmentation_tracker:
-                            split_augmentation_tracker[class_name] += 1
+                        classes_added_this_aug.append(class_name)
                     
-                    # write the augmented annotation
+                    # write augmented annotation
                     if suffix_parts:
                         json_entry = {
                             "image": aug_image_name,
@@ -504,33 +543,24 @@ for split_name, split_ids in splits.items():
                             "suffix": " ".join(suffix_parts)
                         }
                         f_out.write(json.dumps(json_entry) + "\n")
-                    
-                    # break if generated enough augmented samples
-                    if all(split_augmentation_tracker[cls] >= augmentation_needs[cls] 
-                            for cls in augmentation_needs.keys()):
-                        break
+                        
+                        # update remaining needs and final counts
+                        for class_name in classes_added_this_aug:
+                            if class_name in remaining_needs and remaining_needs[class_name] > 0:
+                                remaining_needs[class_name] -= 1
+                                final_class_counts[split_name][class_name] = final_class_counts[split_name].get(class_name, 0) + 1
                 
-                # safety break
-                # prevents infinite loop
-                if aug_counter > len(split_ids) * 10:
-                    print(f"Warning: reached maximum augmentation attempts for {split_name}")
+                if attempt >= max_attempts:
+                    print(f"Warning: Reached maximum augmentation attempts ({max_attempts})")
                     break
             
             print(f"Generated {aug_counter} augmented samples for {split_name}")
-            print("Augmentation counts for this split:")
-            for class_name, count in split_augmentation_tracker.items():
-                print(f"  {class_name}: +{count}")
-    
-    # store final counts for this split
-    final_class_counts[split_name] = split_class_counts.copy()
-    
-    # add augmented counts to final counts for training split
-    if split_name == 'train':
-        for class_name, aug_count in split_augmentation_tracker.items():
-            if class_name in final_class_counts[split_name]:
-                final_class_counts[split_name][class_name] += aug_count
+            print("Final augmentation results:")
+            for class_name, needed in train_augmentation_needs.items():
+                achieved = needed - remaining_needs.get(class_name, 0)
+                print(f"  {class_name}: {achieved}/{needed} samples added")
 
-# print final stats
+
 print("\n" + "="*50)
 print("FINAL CLASS DISTRIBUTION SUMMARY")
 print("="*50)
@@ -547,7 +577,7 @@ for split_name in ['train', 'valid']:
     else:
         print("  No annotations found")
 
-# combined stats
+# Combined statistics
 all_classes = set()
 for split_counts in final_class_counts.values():
     all_classes.update(split_counts.keys())
@@ -563,3 +593,9 @@ print(f"Total images with annotations: {total_combined}")
 for class_name, count in sorted(combined_counts.items()):
     percentage = (count / total_combined) * 100
     print(f"  {class_name}: {count} ({percentage:.1f}%)")
+
+print(f"\nTarget was {TARGET_SAMPLES_PER_CLASS} per class")
+print("Deviation from target:")
+for class_name, count in sorted(combined_counts.items()):
+    deviation = count - TARGET_SAMPLES_PER_CLASS
+    print(f"  {class_name}: {deviation:+d} ({count})")

@@ -28,3 +28,6 @@ florence_attempt/flor.py
 /florence_attempt/model_checkpoints
 output.png
 /florence_attempt/before_training
+florence_attempt/annotations_train.jsonl
+florence_attempt/annotations_valid.jsonl
+florence_attempt/train_original.csv

@@ -7,6 +7,8 @@ import numpy as np
 import os
 import re
 import pydicom
+
+
 class XRayBBoxVisualizer:
     def __init__(self, jsonl_path, ground_truth_csv_path, image_dir, dicom_dir=None):
         self.jsonl_path = jsonl_path

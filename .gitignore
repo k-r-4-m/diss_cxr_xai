@@ -32,3 +32,4 @@ florence_attempt/annotations_train.jsonl
 florence_attempt/annotations_valid.jsonl
 florence_attempt/train_original.csv
 /florence_attempt/old_florence
+padchest_labels_truncated.csv

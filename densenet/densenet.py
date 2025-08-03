@@ -5,12 +5,12 @@ import matplotlib.pyplot as plt
 import os
 import json
 from collections import defaultdict
-from keras.applications.densenet import DenseNet121
-from keras.applications.densenet import preprocess_input
+from keras.applications.densenet import DenseNet121, preprocess_input
 from keras.optimizers import AdamW
 from keras.models import Model, load_model
 from keras.layers import *
 from keras.callbacks import *
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, multilabel_confusion_matrix, ConfusionMatrixDisplay
 
 # Dataset configuration
 DATA_DIR = 'output_dataset'
@@ -24,6 +24,10 @@ BATCH_SIZE = 18
 INPUT_SIZE = 1500  # Target size - all images have at least one side of 1500px
 EPOCHS = 50
 LEARNING_RATE = 5e-6
+
+# creates dir for checkpoints
+CHECKPOINT_DIR = 'densenet_checkpoints'
+os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
 def load_annotations(jsonl_path):
     """Load annotations from JSONL file and extract labels"""
@@ -73,7 +77,7 @@ print(f'Validation samples: {len(valid_annotations)}')
 
 # Create label mappings
 label_2_idx = {label: idx for idx, label in enumerate(all_unique_labels)}
-idx_2_label = {idx: label for idx, label in enumerate(all_unique_labels)}
+idx_2_label = {idx: label for label, idx in label_2_idx.items()}
 
 print(f"Labels: {all_unique_labels}")
 
@@ -165,11 +169,11 @@ def ImageDataGen(annotations_dict, img_dir, n_classes=N_CLASSES,
                 else:
                     yield x_batch, y_batch
 
+# creates the densenet model
 def ClsModel(n_classes=N_CLASSES, input_shape=(1500, 1500, 3)):
-    """Create DenseNet121 model for multi-label classification with padded square images"""
     base_model = DenseNet121(weights='imagenet', include_top=False, input_shape=input_shape)
     
-    # Freeze base model initially (you can unfreeze later for fine-tuning)
+    # freeze base model initially
     base_model.trainable = True
     
     x = GlobalAveragePooling2D(name='avg_pool')(base_model.output)
@@ -196,10 +200,10 @@ model.compile(
 
 # Set up callbacks
 model_checkpoint = ModelCheckpoint(
-    './chest_xray_densenet.{epoch:02d}-{val_loss:.4f}.keras',
-    monitor='val_loss',
-    verbose=1,
-    save_best_only=True,
+    os.path.join(CHECKPOINT_DIR, 'chest_xray_densenet.{epoch:02d}-{val_loss:.4f}.keras'),
+    monitor='val_loss', 
+    verbose=1, 
+    save_best_only=True, 
     save_weights_only=False
 )
 
@@ -273,48 +277,49 @@ if 'precision' in history.history:
     plt.legend()
 
 plt.tight_layout()
-plt.show()
+plt.savefig('densenet_training_history.png', dpi=300) 
+plt.close()
 
-# Test predictions on a few validation samples
-print("Testing predictions...")
-valid_gen_test = ImageDataGen(valid_annotations, VALID_DIR, returnIds=True)
-test_batch = next(valid_gen_test)
-test_preds = model.predict(test_batch[0])
+# # Test predictions on a few validation samples
+# print("Testing predictions...")
+# valid_gen_test = ImageDataGen(valid_annotations, VALID_DIR, returnIds=True)
+# test_batch = next(valid_gen_test)
+# test_preds = model.predict(test_batch[0])
 
-# Display results
-fig = plt.figure(figsize=(20, 12))
-pred_cutoff = 0.3
+# # Display results
+# fig = plt.figure(figsize=(20, 12))
+# pred_cutoff = 0.3
 
-for sample_idx in range(min(8, len(test_batch[0]))):
-    ax = fig.add_subplot(2, 4, sample_idx + 1)
+# for sample_idx in range(min(8, len(test_batch[0]))):
+#     ax = fig.add_subplot(2, 4, sample_idx + 1)
     
-    # Get predicted labels
-    pred_indices = np.where(test_preds[sample_idx] > pred_cutoff)[0]
-    pred_labels = [idx_2_label[i] for i in pred_indices]
+#     # Get predicted labels
+#     pred_indices = np.where(test_preds[sample_idx] > pred_cutoff)[0]
+#     pred_labels = [idx_2_label[i] for i in pred_indices]
     
-    # Get true labels
-    true_indices = np.where(test_batch[1][sample_idx] > 0)[0]
-    true_labels = [idx_2_label[i] for i in true_indices]
+#     # Get true labels
+#     true_indices = np.where(test_batch[1][sample_idx] > 0)[0]
+#     true_labels = [idx_2_label[i] for i in true_indices]
     
-    # Set title with predictions and ground truth
-    title = f"True: {', '.join(true_labels)}\nPred: {', '.join(pred_labels)}"
-    ax.set_title(title, fontsize=8)
+#     # Set title with predictions and ground truth
+#     title = f"True: {', '.join(true_labels)}\nPred: {', '.join(pred_labels)}"
+#     ax.set_title(title, fontsize=8)
     
-    # Display image (convert from preprocessed format)
-    img_display = test_batch[0][sample_idx].copy()
-    img_display = (img_display - img_display.min()) / (img_display.max() - img_display.min())
-    ax.imshow(img_display)
-    ax.set_axis_off()
+#     # Display image (convert from preprocessed format)
+#     img_display = test_batch[0][sample_idx].copy()
+#     img_display = (img_display - img_display.min()) / (img_display.max() - img_display.min())
+#     ax.imshow(img_display)
+#     ax.set_axis_off()
 
-plt.tight_layout()
-plt.show()
+# plt.tight_layout()
+# plt.show()
 
-# Save the final model
-model.save('chest_xray_densenet_final.keras')
-print("Model saved as 'chest_xray_densenet_final.keras'")
+# # Save the final model
+# model.save('chest_xray_densenet_final.keras')
+# print("Model saved as 'chest_xray_densenet_final.keras'")
 
-# Print final metrics
-final_loss = history.history['val_loss'][-1]
-final_acc = history.history['val_accuracy'][-1]
-print(f"Final validation loss: {final_loss:.4f}")
-print(f"Final validation accuracy: {final_acc:.4f}")
+# # Print final metrics
+# final_loss = history.history['val_loss'][-1]
+# final_acc = history.history['val_accuracy'][-1]
+# print(f"Final validation loss: {final_loss:.4f}")
+# print(f"Final validation accuracy: {final_acc:.4f}")

@@ -215,14 +215,15 @@ reduce_learning_rate = ReduceLROnPlateau(
     min_lr=1e-8
 )
 
-early_stopping = EarlyStopping(
-    monitor='val_loss',
-    patience=7,
-    verbose=1,
-    restore_best_weights=True
-)
+# early_stopping = EarlyStopping(
+#     monitor='val_loss',
+#     patience=7,
+#     verbose=1,
+#     restore_best_weights=True
+# )
 
-callbacks = [model_checkpoint, reduce_learning_rate, early_stopping]
+# callbacks = [model_checkpoint, reduce_learning_rate, early_stopping]
+callbacks = [model_checkpoint, reduce_learning_rate]
 
 # Create data generators
 print("Creating data generators...")
@@ -279,47 +280,3 @@ if 'precision' in history.history:
 plt.tight_layout()
 plt.savefig('densenet_training_history.png', dpi=300) 
 plt.close()
-
-# # Test predictions on a few validation samples
-# print("Testing predictions...")
-# valid_gen_test = ImageDataGen(valid_annotations, VALID_DIR, returnIds=True)
-# test_batch = next(valid_gen_test)
-# test_preds = model.predict(test_batch[0])
-
-# # Display results
-# fig = plt.figure(figsize=(20, 12))
-# pred_cutoff = 0.3
-
-# for sample_idx in range(min(8, len(test_batch[0]))):
-#     ax = fig.add_subplot(2, 4, sample_idx + 1)
-    
-#     # Get predicted labels
-#     pred_indices = np.where(test_preds[sample_idx] > pred_cutoff)[0]
-#     pred_labels = [idx_2_label[i] for i in pred_indices]
-    
-#     # Get true labels
-#     true_indices = np.where(test_batch[1][sample_idx] > 0)[0]
-#     true_labels = [idx_2_label[i] for i in true_indices]
-    
-#     # Set title with predictions and ground truth
-#     title = f"True: {', '.join(true_labels)}\nPred: {', '.join(pred_labels)}"
-#     ax.set_title(title, fontsize=8)
-    
-#     # Display image (convert from preprocessed format)
-#     img_display = test_batch[0][sample_idx].copy()
-#     img_display = (img_display - img_display.min()) / (img_display.max() - img_display.min())
-#     ax.imshow(img_display)
-#     ax.set_axis_off()
-
-# plt.tight_layout()
-# plt.show()
-
-# # Save the final model
-# model.save('chest_xray_densenet_final.keras')
-# print("Model saved as 'chest_xray_densenet_final.keras'")
-
-# # Print final metrics
-# final_loss = history.history['val_loss'][-1]
-# final_acc = history.history['val_accuracy'][-1]
-# print(f"Final validation loss: {final_loss:.4f}")
-# print(f"Final validation accuracy: {final_acc:.4f}")

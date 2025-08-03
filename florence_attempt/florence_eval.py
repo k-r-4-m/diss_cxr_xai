@@ -5,7 +5,7 @@ from transformers import get_scheduler, AutoModelForCausalLM, AutoProcessor, Aut
 from peft import LoraConfig, get_peft_model
 from torch.utils.data import DataLoader, Dataset
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix as sk_confusion_matrix
 from torchvision.transforms.functional import to_pil_image
 # from IPython.display import display
 from pydicom.pixel_data_handlers.util import apply_voi_lut
@@ -21,6 +21,7 @@ from  supervision.detection.utils import box_iou_batch
 from florence_tools import *
 import io
 import matplotlib.pyplot as plt
+import seaborn as sns
 import pandas as pd
 import numpy as np
 import torchvision.transforms as T
@@ -246,3 +247,53 @@ print("\n overall precision, recall, and f1")
 print(f"precision = {overall_precision:.3f}")
 print(f"recall = {overall_recall:.3f}")
 print(f"f1 = {overall_f1:.3f}")
+
+
+# Create output directory for confusion matrices
+os.makedirs("confusion_matrices_florence", exist_ok=True)
+
+def get_binary_confusion_matrix_for_class(class_id: int, class_name: str, predictions, targets):
+    y_true = []
+    y_pred = []
+
+    for pred, gt in zip(predictions, targets):
+        gt_ids = set(gt.class_id.tolist())
+        pred_ids = set(pred.class_id.tolist())
+
+        y_true.append(int(class_id in gt_ids))
+        y_pred.append(int(class_id in pred_ids))
+
+    # Compute 2x2 confusion matrix: [[TN, FP], [FN, TP]]
+    cm = sk_confusion_matrix(y_true, y_pred, labels=[0, 1])
+    tn, fp, fn, tp = cm.ravel()
+
+    reordered_cm = np.array([[tp, fn],
+                            [fp, tn]])
+
+    # Plot
+    plt.figure(figsize=(4, 3))
+    sns.heatmap(
+        reordered_cm,
+        annot=True,
+        fmt="d",
+        cmap="Blues",
+        xticklabels=["Positive", "Negative"],
+        yticklabels=["Positive", "Negative"]
+    )
+    plt.title(f"{class_name}")
+    plt.xlabel("Predicted")
+    plt.ylabel("True")
+    plt.tight_layout()
+
+    # Save to folder
+    filename = f"confusion_matrices_florence/conf_matrix_{sanitize_filename(class_name)}.png"
+    plt.savefig(filename, dpi=300)
+    plt.close()
+
+    return cm
+
+# Loop through each class and generate/save its confusion matrix
+print("\nGenerating per-class binary confusion matrices:")
+for class_id, class_name in enumerate(CLASSES):
+    cm = get_binary_confusion_matrix_for_class(class_id, class_name, predictions, targets)
+    print(f"{class_name}:\n{cm}")

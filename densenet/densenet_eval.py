@@ -132,28 +132,36 @@ print(f"F1 Score : {f1:.4f}")
 
 print("Generating per-class confusion matrices...")
 
+os.makedirs("confusion_matrices_densenet", exist_ok=True)
+
 mcm = multilabel_confusion_matrix(y_val, y_pred)
 
-matrix = np.zeros((N_CLASSES + 1, N_CLASSES + 1), dtype=int)
+for i, label in enumerate(CLASSES):
+    cm = mcm[i]
+    tn, fp, fn, tp = cm.ravel()
 
-for i, conf in enumerate(mcm):
-    tn, fp, fn, tp = conf.ravel()
-    matrix[i, i] = tp  # True Positive
-    matrix[i, -1] = fn  # False Negative
-    matrix[-1, i] = fp  # False Positive
-    # Off-diagonal cross-class predictions are skipped as they don't apply
+    reordered_cm = np.array([[tp, fn],
+                             [fp, tn]])
 
-xticks = CLASSES + ['FN']
-yticks = CLASSES + ['FP']
+    plt.figure(figsize=(4, 3))
+    sns.heatmap(
+        reordered_cm,
+        annot=True,
+        fmt="d",
+        cmap="Blues",
+        xticklabels=["Positive", "Negative"],
+        yticklabels=["Positive", "Negative"]
+    )
+    plt.title(f"{label}", fontsize=12)
+    plt.xlabel("Predicted")
+    plt.ylabel("True")
+    plt.tight_layout()
 
-plt.figure(figsize=(20, 20))
-sns.heatmap(matrix, annot=True, fmt='d', cmap='Blues', xticklabels=xticks, yticklabels=yticks, cbar=True)
-plt.title("Multi-label Confusion Matrix (Diagonal: TP, Last Col: FN, Last Row: FP)", fontsize=18)
-plt.ylabel("True Label", fontsize=14)
-plt.xlabel("Predicted Label", fontsize=14)
-plt.tight_layout()
-plt.savefig("confusion_matrix_densenet.png", dpi=300)
-print("Confusion matrix saved as confusion_matrix_densenet.png")
+    filename = f"confusion_matrices_densenet/conf_matrix_{label.replace(' ', '_').replace('/', '_').lower()}.png"
+    plt.savefig(filename, dpi=300)
+    plt.close()
+    print(f"Saved: {filename}")
+
 
 for i, label in enumerate(CLASSES):
     prec = precision_score(y_val[:, i], y_pred[:, i], zero_division=0)

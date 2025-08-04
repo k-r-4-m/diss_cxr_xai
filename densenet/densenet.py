@@ -11,6 +11,7 @@ from keras.models import Model, load_model
 from keras.layers import *
 from keras.callbacks import *
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, multilabel_confusion_matrix, ConfusionMatrixDisplay
+from tensorflow.keras.metrics import AUC
 
 # Dataset configuration
 DATA_DIR = 'output_dataset'
@@ -88,8 +89,7 @@ def pad_image_to_square(image, target_size=1500):
     """
     h, w = image.shape[:2]
     
-    # Since all images already have at least one side = 1500px, no resizing needed
-    # Just pad the shorter dimension to make it square
+    # pad shorter dimension to makes images square
     
     # Calculate padding needed
     pad_h = target_size - h
@@ -173,14 +173,13 @@ def ImageDataGen(annotations_dict, img_dir, n_classes=N_CLASSES,
 def ClsModel(n_classes=N_CLASSES, input_shape=(1500, 1500, 3)):
     base_model = DenseNet121(weights='imagenet', include_top=False, input_shape=input_shape)
     
-    # freeze base model initially
-    base_model.trainable = True
-    
     x = GlobalAveragePooling2D(name='avg_pool')(base_model.output)
-    x = Dense(1024, activation='relu', name='dense_post_pool')(x)
-    x = Dropout(0.5)(x)
-    x = Dense(512, activation='relu', name='dense_intermediate')(x)
-    x = Dropout(0.5)(x)
+    x = Dense(2048, activation='relu', name='dense_1')(x)
+    x = BatchNormalization()(x)
+    x = Dropout(0.3)(x)
+    x = Dense(1024, activation='relu', name='dense_2')(x)
+    x = BatchNormalization()(x)
+    x = Dropout(0.3)(x)
     output = Dense(n_classes, activation='sigmoid', name='predictions')(x)
     
     model = Model(inputs=base_model.input, outputs=output)
@@ -195,22 +194,23 @@ model.summary()
 model.compile(
     optimizer=AdamW(learning_rate=LEARNING_RATE),
     loss='binary_crossentropy',
-    metrics=['accuracy', 'precision', 'recall']
+    # metrics=['accuracy', 'precision', 'recall']
+    metrics=['accuracy', 'precision', 'recall', AUC(multi_label=True)]
 )
 
 # Set up callbacks
 model_checkpoint = ModelCheckpoint(
     os.path.join(CHECKPOINT_DIR, 'chest_xray_densenet.{epoch:02d}-{val_loss:.4f}.keras'),
     monitor='val_loss', 
-    verbose=1, 
-    save_best_only=True, 
+    verbose=1,
+    save_best_only=False, 
     save_weights_only=False
 )
 
 reduce_learning_rate = ReduceLROnPlateau(
     monitor='val_loss',
-    factor=0.5,
-    patience=3,
+    factor=0.5,  # factor by which the learning rate is reduced
+    patience=3,  # num of epochs till learning rate is reduced
     verbose=1,
     min_lr=1e-8
 )

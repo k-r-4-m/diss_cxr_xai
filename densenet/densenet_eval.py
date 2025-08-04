@@ -100,6 +100,20 @@ def get_best_model_by_val_loss(checkpoint_dir):
                 best_model = os.path.join(checkpoint_dir, filename)
     return best_model
 
+def get_last_epoch_model(checkpoint_dir):
+    last_epoch = -1
+    last_model = None
+    pattern = re.compile(r'\.([0-9]+)-([0-9]+\.[0-9]+)\.keras$')
+
+    for filename in os.listdir(checkpoint_dir):
+        match = pattern.search(filename)
+        if match:
+            epoch = int(match.group(1))
+            if epoch > last_epoch:
+                last_epoch = epoch
+                last_model = os.path.join(checkpoint_dir, filename)
+    return last_model
+
 print("Loading validation annotations...")
 valid_annotations = load_annotations(VALID_JSONL)
 label_2_idx = {label: idx for idx, label in enumerate(CLASSES)}
@@ -107,9 +121,13 @@ idx_2_label = {idx: label for label, idx in label_2_idx.items()}
 N_CLASSES = len(CLASSES)
 
 # model = load_model(os.path.join(CHECKPOINT_DIR, 'chest_xray_densenet_final.keras'))
-best_model_path = get_best_model_by_val_loss(CHECKPOINT_DIR)
-print(f"Loading best model from: {best_model_path}")
-model = load_model(best_model_path)
+# best_model_path = get_best_model_by_val_loss(CHECKPOINT_DIR)
+# print(f"Loading best model from: {best_model_path}")
+# model = load_model(best_model_path)
+
+last_model_path = get_last_epoch_model(CHECKPOINT_DIR)
+print(f"Loading last saved model from: {last_model_path}")
+model = load_model(last_model_path)
 
 print("Loading validation images...")
 x_val, y_val = load_validation_data()

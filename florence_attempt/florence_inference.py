@@ -33,19 +33,46 @@ import json
 import html
 import base64
 import itertools
+import matplotlib.patches as patches
 
-# loads the config file for epochs, revision, pathnames, etc.
-config_path = "./config.yaml"
-config = load_config(config_path)
 
-EPOCHS = config.get('epochs')
-REVISION = config.get('revision')
-DICOM_DIR = config.get('dicom_dir')
-ANNOTATIONS_CSV = config.get('annotations_csv')
-OUTPUT_DIR = config.get('output_dir')
-BATCH_SIZE = config.get('batch_size')
-NUM_WORKERS = config.get('num_workers')
-print("config loaded")
+def plot_bbox(image, data):
+   # Create a figure and axes
+    fig, ax = plt.subplots()
+
+    # Display the image
+    ax.imshow(image)
+
+    # Plot each bounding box
+    for bbox, label in zip(data['bboxes'], data['labels']):
+        # Unpack the bounding box coordinates
+        x1, y1, x2, y2 = bbox
+        # Create a Rectangle patch
+        rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=1, edgecolor='r', facecolor='none')
+        # Add the rectangle to the Axes
+        ax.add_patch(rect)
+        # Annotate the label
+        plt.text(x1, y1, label, color='white', fontsize=8, bbox=dict(facecolor='red', alpha=0.5))
+
+    # Remove the axis ticks and labels
+    ax.axis('off')
+
+    # # Show the plot
+    # plt.show()
+
+    filename = "example.png"
+    plt.savefig(filename, dpi=300)
+
+# # loads the config file for epochs, revision, pathnames, etc.
+# config_path = "./config.yaml"
+# config = load_config(config_path)
+
+# EPOCHS = config.get('epochs')
+# REVISION = config.get('revision')
+# print("config loaded")
+
+EPOCHS = 50
+REVISION = 'refs/pr/24'  # revision of florence-2 that fixes the GenerationMixin import error
 
 ## Fine-tuned model evaluation
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -93,7 +120,7 @@ def run_example(task_prompt, text_input=None, image=None):
 
     return parsed_answer
 
-image = Image.open("000d68e42b71d3eac10ccc077aba07c1.png")
+image = Image.open("4007175543191290349892200982275727462_qwczh2.png").convert('RGB')
 print(image)
 
 task = '<CAPTION>'
@@ -107,3 +134,20 @@ print(answer)
 task = '<MORE_DETAILED_CAPTION>'
 answer = run_example(task, image=image)
 print(answer)
+
+# print("\nCombo: ")
+# task_prompt = '<DETAILED_CAPTION>'
+# results = run_example(task_prompt, image=image)
+# text_input = results[task_prompt]
+# task_prompt = '<CAPTION_TO_PHRASE_GROUNDING>'
+# results = run_example(task_prompt, text_input, image)
+# results['<DETAILED_CAPTION>'] = text_input
+# print(results)
+
+# plot_bbox(image, results['<CAPTION_TO_PHRASE_GROUNDING>'])
+
+print("\nOD: ")
+task_prompt = '<OD>'
+results = run_example(task_prompt, image=image)
+print(results)
+plot_bbox(image, results['<OD>'])

@@ -38,8 +38,8 @@ def load_annotations(jsonl_path):
     with open(jsonl_path, 'r') as f:
         for line in f:
             data = json.loads(line.strip())
-            image_name = data['image']  # Adjust key name if different
-            suffix = data['suffix']     # Adjust key name if different
+            image_name = data['image']
+            suffix = data['suffix']
             
             # Extract labels by removing <loc_xxx> tags
             labels = []
@@ -120,8 +120,7 @@ def labels_to_one_hot(labels_list, n_classes=N_CLASSES, lookup_dict=label_2_idx)
             y[idx] = 1
     return y
 
-def ImageDataGen(annotations_dict, img_dir, n_classes=N_CLASSES, 
-                 input_size=INPUT_SIZE, bs=BATCH_SIZE, returnIds=False):
+def ImageDataGen(annotations_dict, img_dir, n_classes=N_CLASSES, input_size=INPUT_SIZE, bs=BATCH_SIZE, returnIds=False):
     """Data generator for training/validation with aspect-ratio preserving padding"""
     image_names = list(annotations_dict.keys())
     
@@ -193,7 +192,8 @@ model.summary()
 # Compile model with AdamW optimizer
 model.compile(
     optimizer=AdamW(learning_rate=LEARNING_RATE),
-    loss='binary_crossentropy',
+    # loss='binary_crossentropy',
+    loss='binary_focal_crossentropy',
     # metrics=['accuracy', 'precision', 'recall']
     metrics=['accuracy', 'precision', 'recall', AUC(multi_label=True)]
 )

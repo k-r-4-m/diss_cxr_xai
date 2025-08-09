@@ -1,0 +1,306 @@
+import os
+import json
+import numpy as np
+import cv2 as cv
+import matplotlib.pyplot as plt
+from keras.models import load_model
+from keras.applications.densenet import preprocess_input as densenet_preprocess
+from keras.applications.efficientnet import preprocess_input as efficientnet_preprocess
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, multilabel_confusion_matrix
+import seaborn as sns
+import re
+import tensorflow as tf
+
+# Configuration
+DATA_DIR = 'output_dataset'
+VALID_DIR = os.path.join(DATA_DIR, 'valid')
+VALID_JSONL = os.path.join(VALID_DIR, 'annotations.jsonl')
+# ENSEMBLE_CHECKPOINT_DIR = 'ensemble_checkpoints_no_focal'
+ENSEMBLE_CHECKPOINT_DIR = 'ensemble_checkpoints'
+INPUT_SIZE = 1500
+BATCH_SIZE = 9
+THRESHOLD = 0.3
+
+CLASSES = [
+    'Cardiomegaly', 'Aortic enlargement', 'Pleural thickening', 'ILD', 'Nodule/Mass',
+    'Pulmonary fibrosis', 'Lung Opacity', 'Atelectasis', 'Other lesion', 'Infiltration',
+    'Pleural effusion', 'Calcification', 'Consolidation', 'Pneumothorax'
+]
+
+
+def load_annotations(jsonl_path):
+    """Load annotations from JSONL file and extract labels"""
+    annotations = {}
+    all_labels = set()
+    
+    with open(jsonl_path, 'r') as f:
+        for line in f:
+            data = json.loads(line.strip())
+            image_name = data['image']
+            suffix = data['suffix']
+            
+            # Extract labels by removing <loc_xxx> tags
+            labels = []
+            parts = suffix.split('<loc_')
+            for i, part in enumerate(parts):
+                if i == 0:
+                    # First part contains the first label
+                    if part.strip():
+                        labels.append(part.strip())
+                else:
+                    # Find the next label after the location tag
+                    if '>' in part:
+                        next_label = part.split('>', 1)[1].strip()
+                        if next_label and not next_label.startswith('<'):
+                            labels.append(next_label.split('<')[0].strip())
+            
+            # Clean and filter labels
+            clean_labels = [label.strip() for label in labels if label.strip()]
+            annotations[image_name] = clean_labels
+            all_labels.update(clean_labels)
+    
+    return annotations, sorted(list(all_labels))
+
+
+def pad_image_to_square(image, target_size=INPUT_SIZE):
+    """
+    Pad image to target_size x target_size square while maintaining aspect ratio.
+    """
+    h, w = image.shape[:2]
+    
+    # Calculate padding needed
+    pad_h = target_size - h
+    pad_w = target_size - w
+    
+    # Pad equally on both sides (center the image)
+    pad_top = pad_h // 2
+    pad_bottom = pad_h - pad_top
+    pad_left = pad_w // 2
+    pad_right = pad_w - pad_left
+    
+    # Apply padding with black pixels (0 values)
+    padded_image = cv.copyMakeBorder(
+        image, 
+        pad_top, pad_bottom, pad_left, pad_right, 
+        cv.BORDER_CONSTANT, 
+        value=[0, 0, 0]
+    )
+    
+    return padded_image
+
+
+def preprocess_for_model(image, model_type):
+    """Apply preprocessing for specific model type"""
+    if model_type == 'densenet':
+        return densenet_preprocess(image.astype(np.float32))
+    elif model_type == 'efficientnet':
+        return efficientnet_preprocess(image.astype(np.float32))
+    else:
+        return image.astype(np.float32) / 255.0
+
+
+def labels_to_one_hot(labels_list, label_map):
+    """Convert list of labels to one-hot encoding"""
+    y = np.zeros(len(label_map))
+    for label in labels_list:
+        if label in label_map:
+            y[label_map[label]] = 1
+    return y
+
+
+def load_validation_data_for_ensemble():
+    """Load validation data in the format expected by ensemble model"""
+    x_val_densenet, x_val_efficientnet, y_val = [], [], []
+    
+    for img_name in valid_annotations:
+        img_path = os.path.join(VALID_DIR, img_name)
+        
+        # Try different extensions if needed
+        if not os.path.exists(img_path):
+            for ext in ['.jpg', '.jpeg', '.png']:
+                alt_path = img_path.rsplit('.', 1)[0] + ext
+                if os.path.exists(alt_path):
+                    img_path = alt_path
+                    break
+        
+        if os.path.exists(img_path):
+            img = cv.imread(img_path)
+            if img is not None:
+                # Apply the same preprocessing as during training
+                img_padded = pad_image_to_square(img)
+                
+                # Preprocess for each model branch
+                img_densenet = preprocess_for_model(img_padded.copy(), 'densenet')
+                img_efficientnet = preprocess_for_model(img_padded.copy(), 'efficientnet')
+                
+                x_val_densenet.append(img_densenet)
+                x_val_efficientnet.append(img_efficientnet)
+                
+                # Convert labels to one-hot
+                y_val.append(labels_to_one_hot(valid_annotations[img_name], label_2_idx))
+    
+    return np.array(x_val_densenet), np.array(x_val_efficientnet), np.array(y_val)
+
+
+def get_best_model_by_val_loss(checkpoint_dir):
+    """Find the model checkpoint with the lowest validation loss"""
+    best_loss = float('inf')
+    best_model = None
+    pattern = re.compile(r'\.(\d+)-(\d+\.\d+)\.keras$')
+
+    for filename in os.listdir(checkpoint_dir):
+        if filename.startswith('ensemble_') and filename.endswith('.keras'):
+            match = pattern.search(filename)
+            if match:
+                loss = float(match.group(2))
+                if loss < best_loss:
+                    best_loss = loss
+                    best_model = os.path.join(checkpoint_dir, filename)
+    return best_model
+
+
+def get_last_epoch_model(checkpoint_dir):
+    """Find the model checkpoint from the last epoch"""
+    last_epoch = -1
+    last_model = None
+    pattern = re.compile(r'\.(\d+)-(\d+\.\d+)\.keras$')
+
+    for filename in os.listdir(checkpoint_dir):
+        if filename.startswith('ensemble_') and filename.endswith('.keras'):
+            match = pattern.search(filename)
+            if match:
+                epoch = int(match.group(1))
+                if epoch > last_epoch:
+                    last_epoch = epoch
+                    last_model = os.path.join(checkpoint_dir, filename)
+    return last_model
+
+
+# Initialize
+print("Loading validation annotations...")
+valid_annotations, all_labels = load_annotations(VALID_JSONL)
+
+# Use the same label mapping as your training script
+label_2_idx = {label: idx for idx, label in enumerate(CLASSES)}
+idx_2_label = {idx: label for label, idx in label_2_idx.items()}
+N_CLASSES = len(CLASSES)
+
+print(f"Found {len(valid_annotations)} validation samples")
+print(f"Using {N_CLASSES} classes: {CLASSES}")
+
+# Load the ensemble model
+print("Loading ensemble model...")
+# model_path = get_last_epoch_model(ENSEMBLE_CHECKPOINT_DIR)
+model_path = get_best_model_by_val_loss(ENSEMBLE_CHECKPOINT_DIR)
+
+if model_path is None:
+    raise ValueError(f"No ensemble model found in {ENSEMBLE_CHECKPOINT_DIR}")
+
+print(f"Loading ensemble model from: {model_path}")
+ensemble_model = load_model(model_path)
+
+# Load validation data
+print("Loading validation images...")
+x_val_densenet, x_val_efficientnet, y_val = load_validation_data_for_ensemble()
+
+print(f"Loaded {len(x_val_densenet)} validation images")
+print(f"DenseNet input shape: {x_val_densenet.shape}")
+print(f"EfficientNet input shape: {x_val_efficientnet.shape}")
+print(f"Labels shape: {y_val.shape}")
+
+# Run predictions
+print("Running ensemble predictions...")
+y_pred_prob = ensemble_model.predict(
+    [x_val_densenet, x_val_efficientnet], 
+    batch_size=BATCH_SIZE, 
+    verbose=1
+)
+
+# Convert probabilities to binary predictions
+y_pred = (y_pred_prob > THRESHOLD).astype(int)
+
+# Calculate overall metrics
+accuracy = accuracy_score(y_val, y_pred)
+precision = precision_score(y_val, y_pred, average='macro', zero_division=0)
+recall = recall_score(y_val, y_pred, average='macro', zero_division=0)
+f1 = f1_score(y_val, y_pred, average='macro', zero_division=0)
+
+print(f"\nEnsemble Model Evaluation Results:")
+print(f"Threshold: {THRESHOLD}")
+print(f"Accuracy : {accuracy:.4f}")
+print(f"Precision: {precision:.4f}")
+print(f"Recall   : {recall:.4f}")
+print(f"F1 Score : {f1:.4f}")
+
+# Generate confusion matrices
+print("Generating per-class confusion matrices...")
+os.makedirs("confusion_matrices_joint_ensemble", exist_ok=True)
+
+mcm = multilabel_confusion_matrix(y_val, y_pred)
+
+for i, label in enumerate(CLASSES):
+    cm = mcm[i]
+    tn, fp, fn, tp = cm.ravel()
+
+    reordered_cm = np.array([[tp, fn],
+                             [fp, tn]])
+
+    plt.figure(figsize=(5, 4))
+    sns.heatmap(
+        reordered_cm,
+        annot=True,
+        fmt="d",
+        cmap="Blues",
+        xticklabels=["Positive", "Negative"],
+        yticklabels=["Positive", "Negative"]
+    )
+    plt.title(f"Joint Ensemble - {label}", fontsize=12)
+    plt.xlabel("Predicted")
+    plt.ylabel("True")
+    plt.tight_layout()
+
+    filename = f"confusion_matrices_joint_ensemble/conf_matrix_{label.replace(' ', '_').replace('/', '_').lower()}.png"
+    plt.savefig(filename, dpi=300)
+    plt.close()
+
+print(f"Confusion matrices saved in: confusion_matrices_joint_ensemble/")
+
+# Per-class detailed metrics
+print(f"\nPer-class Results:")
+print(f"{'Class':<20} {'Precision':<10} {'Recall':<8} {'F1':<8} {'Support':<8}")
+print("-" * 60)
+
+for i, label in enumerate(CLASSES):
+    prec = precision_score(y_val[:, i], y_pred[:, i], zero_division=0)
+    rec = recall_score(y_val[:, i], y_pred[:, i], zero_division=0)
+    f1c = f1_score(y_val[:, i], y_pred[:, i], zero_division=0)
+    support = int(np.sum(y_val[:, i]))
+    
+    print(f"{label:<20} {prec:<10.3f} {rec:<8.3f} {f1c:<8.3f} {support:<8d}")
+
+# Save predictions and probabilities
+print(f"\nSaving predictions...")
+np.save('joint_ensemble_predictions.npy', y_pred)
+np.save('joint_ensemble_probabilities.npy', y_pred_prob)
+np.save('validation_labels.npy', y_val)
+
+# Optional: Threshold analysis
+print(f"\nPerforming threshold analysis...")
+thresholds = np.arange(0.1, 0.9, 0.1)
+threshold_results = []
+
+for thresh in thresholds:
+    temp_pred = (y_pred_prob > thresh).astype(int)
+    temp_f1 = f1_score(y_val, temp_pred, average='macro', zero_division=0)
+    temp_precision = precision_score(y_val, temp_pred, average='macro', zero_division=0)
+    temp_recall = recall_score(y_val, temp_pred, average='macro', zero_division=0)
+    threshold_results.append((thresh, temp_f1, temp_precision, temp_recall))
+    print(f"Threshold {thresh:.1f}: F1={temp_f1:.4f}, Prec={temp_precision:.4f}, Rec={temp_recall:.4f}")
+
+# Find optimal threshold
+best_threshold_idx = np.argmax([result[1] for result in threshold_results])
+best_threshold = threshold_results[best_threshold_idx][0]
+print(f"\nOptimal threshold for F1: {best_threshold:.1f} (F1={threshold_results[best_threshold_idx][1]:.4f})")
+
+print(f"\nEvaluation completed!")
+print(f"Results saved as .npy files")

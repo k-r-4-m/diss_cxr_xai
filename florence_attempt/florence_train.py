@@ -60,15 +60,27 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = AutoModelForCausalLM.from_pretrained(CHECKPOINT, trust_remote_code=True, revision=REVISION).to(DEVICE)
 processor = AutoProcessor.from_pretrained(CHECKPOINT, trust_remote_code=True, revision=REVISION)
 
+# # builds the dataloader for the training set
+# train_dataset = DetectionDataset(
+#     jsonl_file_path = f"{OUTPUT_DIR}/train/annotations.jsonl",
+#     image_directory_path = f"{OUTPUT_DIR}/train/"
+# )
+
+# # builds the dataloader for the validation set
+# val_dataset = DetectionDataset(
+#     jsonl_file_path = f"{OUTPUT_DIR}/valid/annotations.jsonl",
+#     image_directory_path = f"{OUTPUT_DIR}/valid/"
+# )
+
 # builds the dataloader for the training set
 train_dataset = DetectionDataset(
-    jsonl_file_path = f"{OUTPUT_DIR}/train/annotations.jsonl",
+    jsonl_file_path = f"{OUTPUT_DIR}/train/annotations_caption_to_phrase.jsonl",
     image_directory_path = f"{OUTPUT_DIR}/train/"
 )
 
 # builds the dataloader for the validation set
 val_dataset = DetectionDataset(
-    jsonl_file_path = f"{OUTPUT_DIR}/valid/annotations.jsonl",
+    jsonl_file_path = f"{OUTPUT_DIR}/valid/annotations_caption_to_phrase.jsonl",
     image_directory_path = f"{OUTPUT_DIR}/valid/"
 )
 
@@ -115,7 +127,7 @@ def save_inference_results(model, dataset: DetectionDataset, count: int, save_di
             num_beams=3
         )
         generated_text = processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
-        answer = processor.post_process_generation(generated_text, task='<OD>', image_size=image.size)
+        answer = processor.post_process_generation(generated_text, task='<CAPTION_TO_PHRASE_GROUNDING>', image_size=image.size)
 
         try:
             detections = sv.Detections.from_lmm(sv.LMM.FLORENCE_2, answer, resolution_wh=image.size)
@@ -123,7 +135,7 @@ def save_inference_results(model, dataset: DetectionDataset, count: int, save_di
             image_annotated = sv.LabelAnnotator(text_scale=1, text_thickness=2, color_lookup=sv.ColorLookup.INDEX).annotate(image_annotated, detections)
             
             # saves example images of annotations
-            filename = f"epoch{epoch}_{i:03d}_{detections.data['class_name']}.jpg".replace(" ", "_")
+            filename = f"epoch{epoch}_{i:03d}.jpg".replace(" ", "_")
             filename = sanitize_filename(filename)   # cleans filename to make sure it gets saved
             filepath = os.path.join(save_dir, filename)
             image_annotated.save(filepath)
@@ -212,111 +224,3 @@ LR = 5e-6  # learning rate
 
 # runs the training loop to fine tune the model
 train_model(train_loader, val_loader, model, processor, epochs=EPOCHS, lr=LR)
-
-
-# ## Fine-tuned model evaluation
-# DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# CHECKPOINT = f"./model_checkpoints/epoch_{EPOCHS}"  # gets the last checkpoint of the model training
-
-# model = AutoModelForCausalLM.from_pretrained(CHECKPOINT, trust_remote_code=True, revision=REVISION).to(DEVICE)
-# processor = AutoProcessor.from_pretrained(CHECKPOINT, trust_remote_code=True, revision=REVISION)
-
-# # # regex pattern to grab only the class names from the suffixes of annotations
-# # # e.g. turn "Cardiomegaly<loc_286><loc_445><loc_725><loc_789>" into "Cardiomegaly"
-# # PATTERN = r'(.*?)<loc_\d+>'
-
-# # # extracts the class names from the annotations jsonl file
-# # def extract_classes(dataset: DetectionDataset):
-# #     class_set = set()
-# #     for i in range(len(dataset.dataset)):
-# #         image, data = dataset.dataset[i]
-# #         suffix = data["suffix"]
-# #         classes = re.findall(PATTERN, suffix)
-# #         class_set.update(classes)
-# #     return sorted(class_set)
-
-# # CLASSES = extract_classes(train_dataset)
-
-# # gets a list of all the classes in the dataset
-# df = pd.read_csv(ANNOTATIONS_CSV)
-# CLASSES = df['class_name'].unique().tolist()
-# CLASSES.remove("No finding")  # removes no finding from the classes list
-
-# targets = []
-# predictions = []
-
-# # evaluates model on the validation split
-# for i in range(len(val_dataset.dataset)):
-#     image, data = val_dataset.dataset[i]
-#     prefix = data['prefix']  # prefix is the task
-#     suffix = data['suffix']  # suffix is the annotations
-
-#     # gets the output from florence-2
-#     inputs = processor(text=prefix, images=image, return_tensors="pt").to(DEVICE)
-#     generated_ids = model.generate(
-#         input_ids=inputs["input_ids"],
-#         pixel_values=inputs["pixel_values"],
-#         max_new_tokens=1024,
-#         num_beams=3
-#     )
-#     generated_text = processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
-
-#     # builds a Detections object for this prediction
-#     prediction = processor.post_process_generation(generated_text, task='<OD>', image_size=image.size)
-#     prediction = sv.Detections.from_lmm(sv.LMM.FLORENCE_2, prediction, resolution_wh=image.size)
-
-#     # prediction = prediction[np.isin(prediction['class_name'], CLASSES)]
-#     # prediction.class_id = np.array([CLASSES.index(class_name) for class_name in prediction['class_name']])
-#     # prediction.confidence = np.ones(len(prediction))
-
-#     # uses get_close_matches to fuzzy match predicted class names to known classes
-#     # this is because florence-2 often misspells class names
-#     fuzzy_class_names = []
-#     for pred_class in prediction['class_name']:
-#         match = get_close_matches(pred_class, CLASSES, n=1, cutoff=0.75)
-#         if match:
-#             fuzzy_class_names.append(match[0])
-#         else:
-#             fuzzy_class_names.append(None) 
-
-#     # filters out unmatched predictions
-#     valid_indices = [i for i, name in enumerate(fuzzy_class_names) if name is not None]
-#     prediction = prediction[valid_indices]
-#     fuzzy_class_names = [fuzzy_class_names[i] for i in valid_indices]
-
-#     # assigns corrected class ids
-#     prediction.data['class_name'] = np.array(fuzzy_class_names)
-#     prediction.class_id = np.array([CLASSES.index(name) for name in fuzzy_class_names])
-#     prediction.confidence = np.ones(len(prediction))
-
-#     target = processor.post_process_generation(suffix, task='<OD>', image_size=image.size)
-#     target = sv.Detections.from_lmm(sv.LMM.FLORENCE_2, target, resolution_wh=image.size)
-#     target.class_id = np.array([CLASSES.index(class_name) for class_name in target['class_name']])
-
-#     targets.append(target)
-#     predictions.append(prediction)
-
-#     print(f"Target {target}")
-#     print(f"pred {prediction}")
-
-
-# # calculates mAP scores
-# mean_average_precision = sv.MeanAveragePrecision.from_detections(
-#     predictions=predictions,
-#     targets=targets,
-# )
-
-# print(f"map50_95: {mean_average_precision.map50_95:.2f}")
-# print(f"map50: {mean_average_precision.map50:.2f}")
-# print(f"map75: {mean_average_precision.map75:.2f}")
-
-# # calculates and outputs the confusion matrix
-# confusion_matrix = sv.ConfusionMatrix.from_detections(
-#     predictions=predictions,
-#     targets=targets,
-#     classes=CLASSES
-# )
-
-# # saves the confusion matrix as an image
-# fig = confusion_matrix.plot()
-# fig.savefig("confusion_matrix.png", dpi=300, bbox_inches='tight')

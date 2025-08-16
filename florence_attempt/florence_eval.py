@@ -122,7 +122,7 @@ for i in range(len(val_dataset.dataset)):
     # assigns corrected class ids
     prediction.data['class_name'] = np.array(fuzzy_class_names)
     prediction.class_id = np.array([CLASSES.index(name) for name in fuzzy_class_names])
-    prediction.confidence = np.ones(len(prediction))
+    prediction.confidence = np.ones(len(prediction))  # florence-2 doesn't output confidence
 
     target = processor.post_process_generation(suffix, task='<OD>', image_size=image.size)
     target = sv.Detections.from_lmm(sv.LMM.FLORENCE_2, target, resolution_wh=image.size)
@@ -249,7 +249,7 @@ print(f"recall = {overall_recall:.3f}")
 print(f"f1 = {overall_f1:.3f}")
 
 
-# Create output directory for confusion matrices
+# create output directory for confusion matrices
 os.makedirs("confusion_matrices_florence", exist_ok=True)
 
 def get_binary_confusion_matrix_for_class(class_id: int, class_name: str, predictions, targets):

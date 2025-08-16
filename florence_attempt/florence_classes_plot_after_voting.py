@@ -1,3 +1,11 @@
+"""
+    Plots the distribution of classes before and after majority voting in the dataset using a bar plot
+
+    Requires:
+        annotations_train.jsonl: The jsonl file for the training annotations
+        annotations_valid.jsonl: The jsonl file for the validation annotations
+"""
+
 import pandas as pd
 import json
 import matplotlib.pyplot as plt

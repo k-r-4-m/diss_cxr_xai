@@ -1,3 +1,13 @@
+"""
+    Visualises training images before and after data augmentation
+
+    Requires:
+        jsonl_path: A path to the annotations json file formatted in Florence-style
+        ground_truth_csv_path: A path to the original csv file included in Vindr's dataset
+        image_dir: A path to the directory where training images are held
+        dicom_dir: A path to the directory where the original dicom files are held
+"""
+
 import json
 import pandas as pd
 import matplotlib.pyplot as plt

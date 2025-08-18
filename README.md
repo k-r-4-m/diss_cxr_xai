@@ -10,7 +10,7 @@ conda activate florence
 pip install -r florence_requirements.txt
 ```
 
-To install dependencies for [XYZ] and the ensemble models, execute the following commands:
+To install dependencies for [XYZ], execute the following commands:
 ```
 conda create -n XYZ python=3.XX.X -y
 conda activate XYZ

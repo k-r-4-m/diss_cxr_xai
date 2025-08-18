@@ -1,8 +1,6 @@
 # Florence-2 for Chest X-Rays Master's Dissertation
 
 ## Install dependencies
-To install dependencies, execute the following commands:
-
 The various models used in this project require different dependencies.
 
 To install dependencies for Florence-2 and the ensemble models, execute the following commands:
@@ -28,22 +26,6 @@ After the dataset has been downloaded, the directory named "train" in the datase
 
 This should lead to the following file organisation:
 ```
-root/
-├── MIMIC-CXR/
-│   ├── mimic-cxr-2.0.0-chexpert.csv
-│   ├── mimic-cxr-2.0.0-metadata.csv
-│   ├── mimic-cxr-2.0.0-split.csv
-│   ├── reports.csv * 
-│   ├── files/
-│   ├── filtered_reports/ *
-│   └── conversations/ *
-│   │   ├── train/
-│   │   │   ├── standard/
-│   │   │   └── grounding/
-│   │   └── test/
-│   │   │   ├── standard/
-│   │   │   └── grounding/
-
 ├── dicom/
 │   ├── [DICOM FILES GO HERE]
 ├── model_checkpoints/
@@ -54,6 +36,9 @@ root/
 ├── ├── epoch_n
 ├── ensemble_checkpoints/
 ├── ├── epoch_1...
+├── ├── epoch_n
+├── XYZ_checkpoints/
+├── ├── epoch_1
 ├── ├── epoch_n
 | ensemble.py
 | ensemble_eval.py

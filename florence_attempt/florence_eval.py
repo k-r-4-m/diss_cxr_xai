@@ -17,7 +17,7 @@ from tqdm import tqdm
 from datetime import datetime
 from pathvalidate import sanitize_filename
 from collections import defaultdict
-from  supervision.detection.utils import box_iou_batch
+from supervision.detection.utils import box_iou_batch
 from florence_tools import *
 import io
 import matplotlib.pyplot as plt

@@ -305,7 +305,7 @@ df['bbox'] = df[['x_min', 'y_min', 'x_max', 'y_max']].values.tolist()
 df = df.drop(columns=['x_min', 'y_min', 'x_max', 'y_max'])
 
 # analyses class distribution before train/val split
-print("Analyzing global class distribution...")
+print("Global class distribution: ")
 class_counts = calculate_class_distribution(df)
 
 # uses the majority class
@@ -322,7 +322,7 @@ splits = {'train': train_ids, 'valid': val_ids}
 # calculates class distribution per split
 split_class_counts = {'train': {}, 'valid': {}}
 for split_name, split_ids in splits.items():
-    print(f"\nAnalyzing {split_name} class distribution...")
+    print(f"\n {split_name} class distribution")
     for image_id in split_ids:
         try:
             entries = grouped.get_group(image_id)
@@ -344,7 +344,7 @@ for class_name, current_count in split_class_counts['train'].items():
     if current_count < target_for_train:
         train_augmentation_needs[class_name] = target_for_train - current_count
 
-print(f"\nAugmentation plan for training set (target: {int(TARGET_SAMPLES_PER_CLASS * 0.8)}):")
+print(f"\n Aug plan for training set (target: {int(TARGET_SAMPLES_PER_CLASS * 0.8)}):")
 for class_name, needed in train_augmentation_needs.items():
     print(f"  {class_name}: +{needed} samples")
 
@@ -360,7 +360,7 @@ for split_name, split_ids in splits.items():
     
     with open(jsonl_path, "w") as f_out:
         # makes a first pass and processes the original images
-        print(f"\nProcessing original {split_name} images...")
+        print(f"\nGoing through original {split_name} images")
         for image_id in tqdm(split_ids, desc=f"Original {split_name}"):
             image_path = os.path.join(DICOM_DIR, f"{image_id}.dicom")
             if not os.path.exists(image_path):
@@ -418,7 +418,7 @@ for split_name, split_ids in splits.items():
         
         # makes a second pass, generating augmented images
         if split_name == 'train' and train_augmentation_needs:
-            print(f"\nGenerating augmented {split_name} images...")
+            print(f"\nGenerating augmented {split_name} images")
             
             # creates weighted list of images for augmentation based on class needs
             augmentation_candidates = []
@@ -551,7 +551,7 @@ for split_name, split_ids in splits.items():
                                 final_class_counts[split_name][class_name] = final_class_counts[split_name].get(class_name, 0) + 1
                 
                 if attempt >= max_attempts:
-                    print(f"Warning: Reached maximum augmentation attempts ({max_attempts})")
+                    print(f"Warning!!! Reached maximum augmentation attempts ({max_attempts})")
                     break
             
             print(f"Generated {aug_counter} augmented samples for {split_name}")
@@ -582,7 +582,7 @@ all_classes = set()
 for split_counts in final_class_counts.values():
     all_classes.update(split_counts.keys())
 
-print(f"\nCOMBINED STATISTICS:")
+print(f"\nCOMBINED STATS:")
 combined_counts = {}
 for class_name in all_classes:
     total = sum(split_counts.get(class_name, 0) for split_counts in final_class_counts.values())

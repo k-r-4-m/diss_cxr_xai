@@ -26,30 +26,32 @@ After the dataset has been downloaded, the directory named "train" in the datase
 
 This should lead to the following file organisation:
 ```
-├── dicom/
-│   ├── [DICOM FILES GO HERE]
-├── model_checkpoints/
-├── ├── epoch_1...
-├── ├── epoch_n
-├── model_checkpoints_no_defs/
-├── ├── epoch_1...
-├── ├── epoch_n
-├── ensemble_checkpoints/
-├── ├── epoch_1...
-├── ├── epoch_n
-├── XYZ_checkpoints/
-├── ├── epoch_1
-├── ├── epoch_n
-| ensemble.py
-| ensemble_eval.py
-| florence_after_aug.py
-| florence_eval.py
-| florence_eval_phrase_grounding.py
-| florence_phrase_grounding_convert.py
-| florence_preprocess_aug.py
-| florence_tools.py
-| florence_train.py
-| train_original.csv
+root
+└──
+  ├── dicom/
+      └── [DICOM FILES GO HERE]
+  ├── model_checkpoints/
+      └── epoch_1...
+      └── epoch_n
+  ├── model_checkpoints_no_defs/
+      └── epoch_1...
+      └── epoch_n
+  ├── ensemble_checkpoints/
+      └── epoch_1...
+      └── epoch_n
+  ├── XYZ_checkpoints/
+      └── epoch_1
+      └── epoch_n
+  | ensemble.py
+  | ensemble_eval.py
+  | florence_after_aug.py
+  | florence_eval.py
+  | florence_eval_phrase_grounding.py
+  | florence_phrase_grounding_convert.py
+  | florence_preprocess_aug.py
+  | florence_tools.py
+  | florence_train.py
+  | train_original.csv
 ```
 
 ## Data Preprocessing

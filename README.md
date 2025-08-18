@@ -1,4 +1,4 @@
-# Florence-2 for Chest X-Rays Master's Dissertation
+# Master's Dissertation: Trust and Transparency in Healthcare Using Explainable AI 
 
 ## Install dependencies
 The various models used in this project require different dependencies.

@@ -16,6 +16,9 @@ conda create -n XYZ python=3.XX.X -y
 conda activate XYZ
 pip install -r XYZ_requirements.txt
 ```
+
+The use of [XYZ] requires a HuggingFace token. Please place this token into the token_file.yaml file.
+
 ## Dataset
 The dataset used in this project is VinDr-CXR. A slghtly modified version hosted on Kaggle is used, which can be found [here](https://www.kaggle.com/competitions/vinbigdata-chest-xray-abnormalities-detection/overview).
 

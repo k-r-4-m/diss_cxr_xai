@@ -12,7 +12,7 @@ pip install -r florence_requirements.txt
 
 To install dependencies for MAIRA-2, execute the following commands:
 ```
-conda create -n maira_2 python=3.XX.X -y
+conda create -n maira_2 python=3.13.5 -y
 conda activate maira_2
 pip install -r maira_2_requirements.txt
 ```

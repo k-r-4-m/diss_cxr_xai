@@ -10,14 +10,14 @@ conda activate florence
 pip install -r florence_requirements.txt
 ```
 
-To install dependencies for [XYZ], execute the following commands:
+To install dependencies for MAIRA-2, execute the following commands:
 ```
-conda create -n XYZ python=3.XX.X -y
-conda activate XYZ
-pip install -r XYZ_requirements.txt
+conda create -n maira_2 python=3.XX.X -y
+conda activate maira_2
+pip install -r maira_2_requirements.txt
 ```
 
-The use of [XYZ] requires a HuggingFace token. Please place this token into the token_file.yaml file.
+The use of MAIRA-2 requires a HuggingFace token. Please place this token into the token_file.yaml file.
 
 ## Dataset
 The dataset used in this project is VinDr-CXR. A slghtly modified version hosted on Kaggle is used, which can be found [here](https://www.kaggle.com/competitions/vinbigdata-chest-xray-abnormalities-detection/overview).

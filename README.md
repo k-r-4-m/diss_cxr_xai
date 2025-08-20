@@ -42,9 +42,6 @@ root
   ├── ensemble_checkpoints/
       └── epoch_1...
       └── epoch_n
-  ├── XYZ_checkpoints/
-      └── epoch_1
-      └── epoch_n
   | ensemble.py
   | ensemble_eval.py
   | florence_after_aug.py
@@ -61,12 +58,12 @@ root
 Before training any of the models, the dataset needs to be preprocessed and augmented, which can be done so by running the florence_preprocessing_aug.py file.
 
 ## Training the Models
-Running the code to train Florence-2, the ensemble model, and XYZ can be done so by running florence_train.py, ensemble_train.py, and XYZ_train.py files respectively.
+Running the code to train Florence-2 and the ensemble model can be done so by running florence_train.py and ensemble_train.py files respectively.
 
 Please be aware that these models require **significant** resources and time to run. Training was performed on NVIDIA A100 GPUs and 300GB of system RAM. If you attempt to run these models on weak GPUs, you will most likely get out of memory errors. The code should be able to run using only CPU if a CUDA GPU is not available, but this will take substantially longer.
 
 The model checkpoints used for the evaluation results in the dissertation report are stored in this repo.
 
 ## Evaluating the Models
-Model evaluation can be performed by running the florence_eval.py, ensemble_eval.py, and XYZ_eval.py files respectively.
+Model evaluation can be performed by running the florence_eval.py, ensemble_eval.py, and maira_eval.py files respectively.
 

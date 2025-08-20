@@ -65,6 +65,57 @@ processor = AutoProcessor.from_pretrained(CHECKPOINT, trust_remote_code=True)
 model = model.eval()
 model = model.to(DEVICE)
 
+# a dictionary to map synonyms for classes
+# this is because MAIRA-2 will refer to classes by different names/terms
+# not all classes will have synonyms
+CLASS_SYNONYMS = {
+    "aortic enlargement": ["tortuous aorta", "enlarged aorta", "widened aortic contour", "aortic elongation", "aorta is markedly tortuous"],
+    "atelectasis": [],
+    "calcification": ["calcified"],
+    "cardiomegaly": ["enlarged heart", "big heart", "increased cardiac silhouette", "heart size is enlarged", "heart size is slightly enlarged", "cardiac silhouette is mildly enlarged"],
+    "consolidation": ["lung consolidation", "consolidative opacity"],
+    "ild": ["interstitial lung disease", "interstitial prominence", "interstitial lung"],
+    "infiltration": ["infiltrates", "infilitrate"],
+    "lung opacity": ["increased density in the right", "increased density in the left"],
+    "nodule/mass": ["mass", "nodule", "calcified granuloma", "nodular density", "granulomas"],
+    "other lesion": ["subcutaneous emphysema", ],
+    "pleural effusion": ["pleural fluid", "effusion", "effusions", "fluid in pleural space"],
+    "pleural thickening": ["thickening"],
+    "pneumothorax": ["collapsed lung", "air in pleural space"],
+    "pulmonary fibrosis": ["interstitial fibrotic"],
+}
+
+# patterns for when a finding is mentioned but the model says it isnt present
+NEGATION_PATTERNS = [
+    r"\bno\b",
+    r"\bwithout\b",
+    r"\bnot seen\b",
+    r"\babsent\b",
+    r"\bfree of\b",
+    r"\bclear\b",
+    r"\bunremarkable\b",
+    r"\bnormal\b"
+]
+
+# returns true if a finding contains a phrase in NEGATION_PATTERNS
+def is_negated(text: str) -> bool:
+    return any(re.search(pat, text.lower()) for pat in NEGATION_PATTERNS)
+
+# maps the synonyms/variations of findings found in CLASS_SYNONYMS back to the real class names
+def normalise_finding(text: str) -> str:
+    text = text.lower()
+    for real_class, synonyms in CLASS_SYNONYMS.items():
+        if real_class in text:
+            return real_class
+        for syn in synonyms:
+            if syn in text:
+                return real_class
+    # fallback: exact match against class list
+    for cname in CLASSES:
+        if cname.lower() in text:
+            return cname
+    return None
+
 # defines colors for each class
 # used to draw bounding boxes
 CLASS_COLORS = plt.cm.Set3(np.linspace(0, 1, len(CLASSES)))
@@ -229,25 +280,53 @@ def parse_maira_prediction_to_detections(maira_list: List[Tuple[str, List[Tuple[
     for finding_text, bboxes in maira_list:
         if not isinstance(finding_text, str):
             continue
-        finding_lc = finding_text.lower()
 
-        for cid, cname in enumerate(CLASSES):
-            if cname.lower() in finding_lc:
-                if bboxes is not None and len(bboxes) > 0:  # maira sometimes responds with bboxes as None
-                    for (x1n, y1n, x2n, y2n) in bboxes:
-                        x1 = clamp(x1n * W, 0, W)
-                        y1 = clamp(y1n * H, 0, H)
-                        x2 = clamp(x2n * W, 0, W)
-                        y2 = clamp(y2n * H, 0, H)
-                        x_min, x_max = sorted([x1, x2])
-                        y_min, y_max = sorted([y1, y2])
-                        xyxy.append([x_min, y_min, x_max, y_max])
-                        class_ids.append(cid)
-                        confs.append(1.0)
-                else:  # keep class mention even without grounding
-                    xyxy.append([1.0, 1.0, 2.0, 2.0])  # just a 1x1 bounding box in the top left
-                    class_ids.append(cid)
-                    confs.append(1.0)
+        # skip negated findings
+        if is_negated(finding_text):
+            continue
+
+        norm_finding = normalise_finding(finding_text)
+        if norm_finding is None or norm_finding not in CLASSES:
+            continue
+
+        cid = CLASSES.index(norm_finding)
+
+        if bboxes is not None and len(bboxes) > 0:  # maira sometimes responds with bboxes as None
+            for (x1n, y1n, x2n, y2n) in bboxes:
+                x1 = clamp(x1n * W, 0, W)
+                y1 = clamp(y1n * H, 0, H)
+                x2 = clamp(x2n * W, 0, W)
+                y2 = clamp(y2n * H, 0, H)
+                x_min, x_max = sorted([x1, x2])
+                y_min, y_max = sorted([y1, y2])
+                xyxy.append([x_min, y_min, x_max, y_max])
+                class_ids.append(cid)
+                confs.append(1.0)
+        else:
+            # keep class mention even without grounding
+            xyxy.append([1.0, 1.0, 2.0, 2.0])  # just a 1x1 bounding box in the top left
+            class_ids.append(cid)
+            confs.append(1.0)
+
+        # finding_lc = finding_text.lower()
+
+        # for cid, cname in enumerate(CLASSES):
+        #     if cname.lower() in finding_lc:
+        #         if bboxes is not None and len(bboxes) > 0:  # maira sometimes responds with bboxes as None
+        #             for (x1n, y1n, x2n, y2n) in bboxes:
+        #                 x1 = clamp(x1n * W, 0, W)
+        #                 y1 = clamp(y1n * H, 0, H)
+        #                 x2 = clamp(x2n * W, 0, W)
+        #                 y2 = clamp(y2n * H, 0, H)
+        #                 x_min, x_max = sorted([x1, x2])
+        #                 y_min, y_max = sorted([y1, y2])
+        #                 xyxy.append([x_min, y_min, x_max, y_max])
+        #                 class_ids.append(cid)
+        #                 confs.append(1.0)
+        #         else:  # keep class mention even without grounding
+        #             xyxy.append([1.0, 1.0, 2.0, 2.0])  # just a 1x1 bounding box in the top left
+        #             class_ids.append(cid)
+        #             confs.append(1.0)
 
     if not xyxy:
         return sv.Detections.empty()

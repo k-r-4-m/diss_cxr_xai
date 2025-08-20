@@ -11,7 +11,6 @@ import seaborn as sns
 import re
 import tensorflow as tf
 
-# Configuration
 DATA_DIR = 'output_dataset'
 VALID_DIR = os.path.join(DATA_DIR, 'valid')
 VALID_JSONL = os.path.join(VALID_DIR, 'annotations.jsonl')
@@ -19,7 +18,7 @@ VALID_JSONL = os.path.join(VALID_DIR, 'annotations.jsonl')
 ENSEMBLE_CHECKPOINT_DIR = 'ensemble_checkpoints'
 INPUT_SIZE = 1500
 BATCH_SIZE = 9
-THRESHOLD = 0.3
+THRESHOLD = 0.1
 
 CLASSES = [
     'Cardiomegaly', 'Aortic enlargement', 'Pleural thickening', 'ILD', 'Nodule/Mass',
@@ -28,8 +27,8 @@ CLASSES = [
 ]
 
 
+# loads annotations from the jsonl file and extract the labels
 def load_annotations(jsonl_path):
-    """Load annotations from JSONL file and extract labels"""
     annotations = {}
     all_labels = set()
     
@@ -39,22 +38,22 @@ def load_annotations(jsonl_path):
             image_name = data['image']
             suffix = data['suffix']
             
-            # Extract labels by removing <loc_xxx> tags
+            # extracts the labels by getting rid of <loc_...> tags
             labels = []
             parts = suffix.split('<loc_')
             for i, part in enumerate(parts):
                 if i == 0:
-                    # First part contains the first label
+                    # first part contains the first label
                     if part.strip():
                         labels.append(part.strip())
                 else:
-                    # Find the next label after the location tag
+                    # finds the next label based on the loc tag
                     if '>' in part:
                         next_label = part.split('>', 1)[1].strip()
                         if next_label and not next_label.startswith('<'):
                             labels.append(next_label.split('<')[0].strip())
             
-            # Clean and filter labels
+            # clean and filter the labels
             clean_labels = [label.strip() for label in labels if label.strip()]
             annotations[image_name] = clean_labels
             all_labels.update(clean_labels)
@@ -62,23 +61,23 @@ def load_annotations(jsonl_path):
     return annotations, sorted(list(all_labels))
 
 
+# pads an image to a target size
+# maintains aspect ratio
 def pad_image_to_square(image, target_size=INPUT_SIZE):
-    """
-    Pad image to target_size x target_size square while maintaining aspect ratio.
-    """
     h, w = image.shape[:2]
     
-    # Calculate padding needed
+    # calc the padding needed for this image
     pad_h = target_size - h
     pad_w = target_size - w
     
-    # Pad equally on both sides (center the image)
+    # pads equally on both sides
     pad_top = pad_h // 2
     pad_bottom = pad_h - pad_top
     pad_left = pad_w // 2
     pad_right = pad_w - pad_left
     
-    # Apply padding with black pixels (0 values)
+    # padding with black pixels
+    # (0, 0, 0 is black)
     padded_image = cv.copyMakeBorder(
         image, 
         pad_top, pad_bottom, pad_left, pad_right, 
@@ -89,8 +88,8 @@ def pad_image_to_square(image, target_size=INPUT_SIZE):
     return padded_image
 
 
+# different preprocessing needed for each model
 def preprocess_for_model(image, model_type):
-    """Apply preprocessing for specific model type"""
     if model_type == 'densenet':
         return densenet_preprocess(image.astype(np.float32))
     elif model_type == 'efficientnet':
@@ -99,8 +98,8 @@ def preprocess_for_model(image, model_type):
         return image.astype(np.float32) / 255.0
 
 
+# converts a list of labels into one-hot encoding
 def labels_to_one_hot(labels_list, label_map):
-    """Convert list of labels to one-hot encoding"""
     y = np.zeros(len(label_map))
     for label in labels_list:
         if label in label_map:
@@ -108,14 +107,14 @@ def labels_to_one_hot(labels_list, label_map):
     return y
 
 
+# loads the validation data for the model
 def load_validation_data_for_ensemble():
-    """Load validation data in the format expected by ensemble model"""
     x_val_densenet, x_val_efficientnet, y_val = [], [], []
     
     for img_name in valid_annotations:
         img_path = os.path.join(VALID_DIR, img_name)
         
-        # Try different extensions if needed
+        # just in case the images were saved as non png for whatever reason
         if not os.path.exists(img_path):
             for ext in ['.jpg', '.jpeg', '.png']:
                 alt_path = img_path.rsplit('.', 1)[0] + ext
@@ -126,24 +125,24 @@ def load_validation_data_for_ensemble():
         if os.path.exists(img_path):
             img = cv.imread(img_path)
             if img is not None:
-                # Apply the same preprocessing as during training
+                # same preprocessing as in training
                 img_padded = pad_image_to_square(img)
                 
-                # Preprocess for each model branch
+                # preprocess for each model branch
                 img_densenet = preprocess_for_model(img_padded.copy(), 'densenet')
                 img_efficientnet = preprocess_for_model(img_padded.copy(), 'efficientnet')
                 
                 x_val_densenet.append(img_densenet)
                 x_val_efficientnet.append(img_efficientnet)
                 
-                # Convert labels to one-hot
+                # converts labels to one-hot
                 y_val.append(labels_to_one_hot(valid_annotations[img_name], label_2_idx))
     
     return np.array(x_val_densenet), np.array(x_val_efficientnet), np.array(y_val)
 
 
-def get_best_model_by_val_loss(checkpoint_dir):
-    """Find the model checkpoint with the lowest validation loss"""
+# gets the best model checkpoint with the lowest loss
+def get_best_model_by_loss(checkpoint_dir):
     best_loss = float('inf')
     best_model = None
     pattern = re.compile(r'\.(\d+)-(\d+\.\d+)\.keras$')
@@ -159,8 +158,9 @@ def get_best_model_by_val_loss(checkpoint_dir):
     return best_model
 
 
+# gets the checkpoint from the last epoch
+# prolly not gonna use, just curious
 def get_last_epoch_model(checkpoint_dir):
-    """Find the model checkpoint from the last epoch"""
     last_epoch = -1
     last_model = None
     pattern = re.compile(r'\.(\d+)-(\d+\.\d+)\.keras$')
@@ -176,31 +176,29 @@ def get_last_epoch_model(checkpoint_dir):
     return last_model
 
 
-# Initialize
-print("Loading validation annotations...")
+print("Loading validation annotations")
 valid_annotations, all_labels = load_annotations(VALID_JSONL)
 
-# Use the same label mapping as your training script
 label_2_idx = {label: idx for idx, label in enumerate(CLASSES)}
 idx_2_label = {idx: label for label, idx in label_2_idx.items()}
 N_CLASSES = len(CLASSES)
 
-print(f"Found {len(valid_annotations)} validation samples")
-print(f"Using {N_CLASSES} classes: {CLASSES}")
+print(f"{len(valid_annotations)} validation samples")
+print(f"{N_CLASSES} classes: {CLASSES}")
 
-# Load the ensemble model
-print("Loading ensemble model...")
+# loads the model checkpoint
+print("Loading model")
 # model_path = get_last_epoch_model(ENSEMBLE_CHECKPOINT_DIR)
-model_path = get_best_model_by_val_loss(ENSEMBLE_CHECKPOINT_DIR)
+model_path = get_best_model_by_loss(ENSEMBLE_CHECKPOINT_DIR)
 
 if model_path is None:
-    raise ValueError(f"No ensemble model found in {ENSEMBLE_CHECKPOINT_DIR}")
+    raise ValueError(f"No ensemble model found in {ENSEMBLE_CHECKPOINT_DIR}!!!")
 
-print(f"Loading ensemble model from: {model_path}")
+print(f"Loading ensemble model with path: {model_path}")
 ensemble_model = load_model(model_path)
 
-# Load validation data
-print("Loading validation images...")
+# loads the validation data
+print("Loading validation items")
 x_val_densenet, x_val_efficientnet, y_val = load_validation_data_for_ensemble()
 
 print(f"Loaded {len(x_val_densenet)} validation images")
@@ -208,24 +206,23 @@ print(f"DenseNet input shape: {x_val_densenet.shape}")
 print(f"EfficientNet input shape: {x_val_efficientnet.shape}")
 print(f"Labels shape: {y_val.shape}")
 
-# Run predictions
-print("Running ensemble predictions...")
+print("Running model predictions")
 y_pred_prob = ensemble_model.predict(
     [x_val_densenet, x_val_efficientnet], 
     batch_size=BATCH_SIZE, 
     verbose=1
 )
 
-# Convert probabilities to binary predictions
+# converts the probabilities to binary predictions using the threshold
 y_pred = (y_pred_prob > THRESHOLD).astype(int)
 
-# Calculate overall metrics
+# calculate accuracy, precision, recall, f1
 accuracy = accuracy_score(y_val, y_pred)
 precision = precision_score(y_val, y_pred, average='macro', zero_division=0)
 recall = recall_score(y_val, y_pred, average='macro', zero_division=0)
 f1 = f1_score(y_val, y_pred, average='macro', zero_division=0)
 
-print(f"\nEnsemble Model Evaluation Results:")
+print(f"\nModel eval results: ")
 print(f"Threshold: {THRESHOLD}")
 print(f"Accuracy : {accuracy:.4f}")
 print(f"Precision: {precision:.4f}")
@@ -233,7 +230,7 @@ print(f"Recall   : {recall:.4f}")
 print(f"F1 Score : {f1:.4f}")
 
 # Generate confusion matrices
-print("Generating per-class confusion matrices...")
+print("Generating per-class confusion matrices")
 os.makedirs("confusion_matrices_joint_ensemble", exist_ok=True)
 
 mcm = multilabel_confusion_matrix(y_val, y_pred)
@@ -267,25 +264,18 @@ print(f"Confusion matrices saved in: confusion_matrices_joint_ensemble/")
 
 # Per-class detailed metrics
 print(f"\nPer-class Results:")
-print(f"{'Class':<20} {'Precision':<10} {'Recall':<8} {'F1':<8} {'Support':<8}")
+print(f"{'Class':<20} {'Precision':<10} {'Recall':<8} {'F1':<8}")
 print("-" * 60)
 
 for i, label in enumerate(CLASSES):
     prec = precision_score(y_val[:, i], y_pred[:, i], zero_division=0)
     rec = recall_score(y_val[:, i], y_pred[:, i], zero_division=0)
     f1c = f1_score(y_val[:, i], y_pred[:, i], zero_division=0)
-    support = int(np.sum(y_val[:, i]))
     
-    print(f"{label:<20} {prec:<10.3f} {rec:<8.3f} {f1c:<8.3f} {support:<8d}")
+    print(f"{label:<20} {prec:<10.3f} {rec:<8.3f} {f1c:<8.3f}")
 
-# Save predictions and probabilities
-print(f"\nSaving predictions...")
-np.save('joint_ensemble_predictions.npy', y_pred)
-np.save('joint_ensemble_probabilities.npy', y_pred_prob)
-np.save('validation_labels.npy', y_val)
-
-# Optional: Threshold analysis
-print(f"\nPerforming threshold analysis...")
+# testing different thresholds
+print(f"\nThreshold analysis: ")
 thresholds = np.arange(0.1, 0.9, 0.1)
 threshold_results = []
 
@@ -297,10 +287,7 @@ for thresh in thresholds:
     threshold_results.append((thresh, temp_f1, temp_precision, temp_recall))
     print(f"Threshold {thresh:.1f}: F1={temp_f1:.4f}, Prec={temp_precision:.4f}, Rec={temp_recall:.4f}")
 
-# Find optimal threshold
+# find the optimal threshold
 best_threshold_idx = np.argmax([result[1] for result in threshold_results])
 best_threshold = threshold_results[best_threshold_idx][0]
 print(f"\nOptimal threshold for F1: {best_threshold:.1f} (F1={threshold_results[best_threshold_idx][1]:.4f})")
-
-print(f"\nEvaluation completed!")
-print(f"Results saved as .npy files")

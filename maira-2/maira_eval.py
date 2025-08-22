@@ -113,63 +113,74 @@ def normalise_finding(text: str) -> str:
         if class_name.lower() in text:
             return class_name
     
-    # otherwise check synonyms
+    # otherwise check if a full synonym phrase appears
     for real_class, synonyms in CLASS_SYNONYMS.items():
         for syn in synonyms:
             if syn.lower() in text:
                 return real_class
             
-    # now check each word to find synonyms
+    # final check to check each word for synonyms
     text_words = re.findall(r'\b\w+\b', text)
     
-    # list of key trigger words for each class
-    key_word_mappings = {
-        "aortic enlargement": ["tortuous"],
-        "atelectasis": ["atelectasis", "collapse"],
-        "calcification": ["calcified", "calcification"],
-        "cardiomegaly": ["cardiac"],
-        "consolidation": ["consolidation", "consolidative"],
-        "ild": ["interstitial"],
-        "infiltration": ["infiltrate", "infiltrates", "infiltration"],
-        "lung opacity": ["opacity", "opacification", "density"],
-        "nodule/mass": ["nodule", "nodular", "mass", "granuloma", "granulomas"],
-        "other lesion": ["emphysema", "lesion"],
-        "pleural effusion": ["effusion", "effusions"],
-        "pleural thickening": ["thickening"],
-        "pneumothorax": ["pneumothorax"],
-        "pulmonary fibrosis": ["fibrotic", "fibrosis"]
-    }
-    
-    # Check for key word matches
-
-    # check for any matches of key words
-    for class_name, key_words in key_word_mappings.items():
-        for key_word in key_words:
-            if key_word in text_words:
-                # tortuous only maps when other words are used (i.e. aorta, aortic, thoracic)
-                if key_word == "tortuous":
-                    if any(word in text_words for word in ["aorta", "aortic", "thoracic"]):
-                        return class_name
-                # cardic only maps when enlargement is mentioned
-                elif key_word == "cardiac":
-                    if any(word in text_words for word in ["enlarged", "enlargement", "silhouette", "size"]):
-                        return class_name
-                # opacity or opacification only maps to lung opacity
-                elif key_word in ["opacity", "opacification"]:
-                    # need to also check if its not matched to something else more specific
-                    if not any(specific_word in text_words for specific_word in 
-                              ["consolidation", "consolidative", "infiltrate", "effusion"]):
-                        return class_name
-                else:
+    for class_name, synonyms in CLASS_SYNONYMS.items():
+        for synonym in synonyms:
+            synonym_words = re.findall(r'\b\w+\b', synonym.lower())
+            for word in synonym_words:
+                if len(word) > 3 and word in text_words:  # only get actual words
+                    print(f"found word match: '{word}' from synonym '{synonym}' -> {class_name}")
+                    # for other words, return immediately
                     return class_name
     
-    # fallback mechanism to check if any word from the main class name appears
-    for real_class in CLASSES:
-        class_words = re.findall(r'\b\w+\b', real_class.lower())
-        if any(word in text_words and len(word) > 3 for word in class_words):
-            return real_class
-    
     return None
+
+    # # list of key trigger words for each class
+    # key_word_mappings = {
+    #     "aortic enlargement": ["tortuous"],
+    #     "atelectasis": ["atelectasis", "collapse"],
+    #     "calcification": ["calcified", "calcification"],
+    #     "cardiomegaly": ["cardiac"],
+    #     "consolidation": ["consolidation", "consolidative"],
+    #     "ild": ["interstitial"],
+    #     "infiltration": ["infiltrate", "infiltrates", "infiltration"],
+    #     "lung opacity": ["opacity", "opacification", "density"],
+    #     "nodule/mass": ["nodule", "nodular", "mass", "granuloma", "granulomas"],
+    #     "other lesion": ["emphysema", "lesion"],
+    #     "pleural effusion": ["effusion", "effusions"],
+    #     "pleural thickening": ["thickening"],
+    #     "pneumothorax": ["pneumothorax"],
+    #     "pulmonary fibrosis": ["fibrotic", "fibrosis"]
+    # }
+    
+    # # Check for key word matches
+
+    # # check for any matches of key words
+    # for class_name, key_words in key_word_mappings.items():
+    #     for key_word in key_words:
+    #         if key_word in text_words:
+    #             # tortuous only maps when other words are used (i.e. aorta, aortic, thoracic)
+    #             if key_word == "tortuous":
+    #                 if any(word in text_words for word in ["aorta", "aortic", "thoracic"]):
+    #                     return class_name
+    #             # cardic only maps when enlargement is mentioned
+    #             elif key_word == "cardiac":
+    #                 if any(word in text_words for word in ["enlarged", "enlargement", "silhouette", "size"]):
+    #                     return class_name
+    #             # opacity or opacification only maps to lung opacity
+    #             elif key_word in ["opacity", "opacification"]:
+    #                 # need to also check if its not matched to something else more specific
+    #                 if not any(specific_word in text_words for specific_word in 
+    #                           ["consolidation", "consolidative", "infiltrate", "effusion"]):
+    #                     return class_name
+    #             else:
+    #                 return class_name
+    
+    # # fallback mechanism to check if any word from the main class name appears
+    # for real_class in CLASSES:
+    #     class_words = re.findall(r'\b\w+\b', real_class.lower())
+    #     if any(word in text_words and len(word) > 3 for word in class_words):
+    #         return real_class
+    
+    # return None
 
 # defines colors for each class
 # used to draw bounding boxes
@@ -185,9 +196,8 @@ GT_PATTERN = re.compile(
     r"([A-Za-z0-9 _\-/]+?)\s*<loc_(\d+)><loc_(\d+)><loc_(\d+)><loc_(\d+)>"
 )
 
-# Function to draw bounding boxes on image
+# function to draw bounding boxes on image
 def draw_bboxes_on_image(image, detections, title, class_names):
-    """Draw bounding boxes on image with class labels and colors"""
     img_with_boxes = image.copy()
     draw = ImageDraw.Draw(img_with_boxes)
     try:
@@ -215,7 +225,6 @@ def draw_bboxes_on_image(image, detections, title, class_names):
 
 # plots the two bounding boxed images side by side
 def create_side_by_side_visualization(image, gt_detections, pred_detections, class_names, image_name, save_dir="visualizations"):
-    """Create side-by-side visualization of ground truth and predictions"""
     os.makedirs(save_dir, exist_ok=True)
     # Draw bboxes on images
     gt_image = draw_bboxes_on_image(image, gt_detections, "Ground Truth", class_names)
@@ -372,40 +381,43 @@ def parse_maira_prediction_to_detections(maira_list: List[Tuple[str, List[Tuple[
         # tries to normalise the finding to a known class
         normalised_class = normalise_finding(finding_text)
         
-        if normalised_class is None or normalised_class not in CLASSES:
-            print(f"Could not map finding '{finding_text}' to any known class")
-
-            # fallback mechanism to extract individual findings from text if it has any <obj> tags
+        if normalised_class is None:
+            # Try extracting individual findings if text contains <obj> tags
             sub_findings = extract_findings_from_maira_text(finding_text)
             for sub_finding in sub_findings:
-                if is_negated(sub_finding):
-                    continue
-                sub_normalised = normalise_finding(sub_finding)
-                if sub_normalised and sub_normalised in CLASSES:
-                    class_id = CLASSES.index(sub_normalised)
-                    # no localisaton given, add 1x1 bounding box in top left
-                    xyxy.append([1.0, 1.0, 2.0, 2.0])
-                    class_ids.append(class_id)
-                    confs.append(1.0)
-                    print(f"Mapped sub-finding '{sub_finding}' to class '{sub_normalised}'")
+                if not is_negated(sub_finding):
+                    sub_mapped = normalise_finding(sub_finding)
+                    if sub_mapped:
+                        class_id = CLASSES.index(sub_mapped)
+                        # no localisaton given, add 1x1 bounding box in top left
+                        xyxy.append([1.0, 1.0, 2.0, 2.0])
+                        class_ids.append(class_id)
+                        confs.append(1.0)
+                        print(f"  Mapped sub-finding '{sub_finding}' -> {sub_mapped}")
             continue
-
+        
+        if normalised_class not in CLASSES:
+            print(f"Mapped class '{normalised_class}' not in classes list!")
+            continue
+            
         class_id = CLASSES.index(normalised_class)
-        print(f"Mapped finding '{finding_text}' to class '{normalised_class}' (ID: {class_id})")
-
-        # handles the bounding boxes
-        if bboxes is not None and len(bboxes) > 0:
+        print(f"  Final mapping: '{finding_text}' -> {normalised_class} (ID: {class_id})")
+        
+        # handles bounding boxes
+        if bboxes and len(bboxes) > 0:
             for bbox in bboxes:
                 if len(bbox) == 4:
-                    x1n, y1n, x2n, y2n = bbox
-                    x1 = clamp(x1n * W, 0, W)
-                    y1 = clamp(y1n * H, 0, H)
-                    x2 = clamp(x2n * W, 0, W)
-                    y2 = clamp(y2n * H, 0, H)
-                    x_min, x_max = sorted([x1, x2])
-                    y_min, y_max = sorted([y1, y2])
-
-                    # makes sure the box has a min size
+                    x1, y1, x2, y2 = bbox
+                    # converts normalised coords to pixels
+                    x1_px = max(0, min(W, x1 * W))
+                    y1_px = max(0, min(H, y1 * H))
+                    x2_px = max(0, min(W, x2 * W))
+                    y2_px = max(0, min(H, y2 * H))
+                    
+                    # ensures valid box
+                    x_min, x_max = sorted([x1_px, x2_px])
+                    y_min, y_max = sorted([y1_px, y2_px])
+                    
                     if x_max - x_min < 1:
                         x_max = x_min + 1
                     if y_max - y_min < 1:
@@ -419,12 +431,13 @@ def parse_maira_prediction_to_detections(maira_list: List[Tuple[str, List[Tuple[
             xyxy.append([1.0, 1.0, 2.0, 2.0])  # just a 1x1 bounding box in the top left
             class_ids.append(class_id)
             confs.append(1.0)
-
-    print(f"Final detections: {len(xyxy)} boxes, classes: {class_ids}")
-
+    
+    print(f"\nFinal result: {len(xyxy)} detections")
+    print(f"Classes: {[CLASSES[cid] for cid in class_ids]}")
+    
     if not xyxy:
         return sv.Detections.empty()
-
+    
     return sv.Detections(
         xyxy=np.array(xyxy, dtype=float),
         class_id=np.array(class_ids, dtype=int),
@@ -555,7 +568,7 @@ with open(ANNOTATIONS_JSON, "r") as f:
         targets.append(gt)
 
         # model forward
-        # we only have frontal x-rays
+        # there's only have frontal x-rays with vindr
         inputs = processor.format_and_preprocess_reporting_input(
             current_frontal=image,
             current_lateral=None,
@@ -704,6 +717,7 @@ print(f"f1 = {f1_cls:.3f}")
 # per class binary conf matrices
 os.makedirs("confusion_matrices_maira2", exist_ok=True)
 
+# generates and saves confusion matrices per class
 def get_binary_confusion_matrix_for_class(class_id: int, class_name: str, predictions, targets):
     y_true, y_pred = [], []
     for pred, gt in zip(predictions, targets):
@@ -725,9 +739,17 @@ def get_binary_confusion_matrix_for_class(class_id: int, class_name: str, predic
     filename = f"confusion_matrices_maira2/conf_matrix_{sanitize_filename(class_name)}.png"
     plt.savefig(filename, dpi=300)
     plt.close()
-    return cm
+
+    # calculate per-class precision, recall, and F1 classification-style
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall    = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1        = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+
+    return cm, precision, recall, f1
 
 print("\nGenerating per-class binary confusion matrices:")
 for class_id, class_name in enumerate(CLASSES):
-    cm = get_binary_confusion_matrix_for_class(class_id, class_name, predictions, targets)
+    cm, precision, recall, f1 = get_binary_confusion_matrix_for_class(class_id, class_name, predictions, targets)
     print(f"{class_name}:\n{cm}")
+
+    print(f" Precision: {precision:.3f}, Recall: {recall:.3f}, F1: {f1:.3f}\n")

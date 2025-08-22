@@ -13,6 +13,7 @@ import os
 import re
 import json
 import yaml
+import string
 from collections import defaultdict
 from difflib import get_close_matches
 import numpy as np
@@ -69,13 +70,13 @@ model = model.to(DEVICE)
 # this is because MAIRA-2 will refer to classes by different names/terms
 # not all classes will have synonyms
 CLASS_SYNONYMS = {
-    "aortic enlargement": ["tortuous aorta", "enlarged aorta", "widened aortic contour", "aortic elongation", "aorta is markedly tortuous"],
+    "aortic enlargement": ["tortuous aorta", "enlarged aorta", "widened aortic contour", "aortic elongation", "aorta is tortuous", "aorta is markedly tortuous"],
     "atelectasis": [],
     "calcification": ["calcified"],
     "cardiomegaly": ["enlarged heart", "big heart", "increased cardiac silhouette", "heart size is enlarged", "heart size is slightly enlarged", "cardiac silhouette is mildly enlarged"],
     "consolidation": ["lung consolidation", "consolidative opacity"],
     "ild": ["interstitial lung disease", "interstitial prominence", "interstitial lung"],
-    "infiltration": ["infiltrates", "infilitrate"],
+    "infiltration": ["infiltrates", "infiltrate"],
     "lung opacity": ["increased density in the right", "increased density in the left"],
     "nodule/mass": ["mass", "nodule", "calcified granuloma", "nodular density", "granulomas"],
     "other lesion": ["subcutaneous emphysema", ],
@@ -99,21 +100,75 @@ NEGATION_PATTERNS = [
 
 # returns true if a finding contains a phrase in NEGATION_PATTERNS
 def is_negated(text: str) -> bool:
-    return any(re.search(pat, text.lower()) for pat in NEGATION_PATTERNS)
+    text_lower = text.lower().strip()
+    return any(re.search(pat, text_lower) for pat in NEGATION_PATTERNS)
 
 # maps the synonyms/variations of findings found in CLASS_SYNONYMS back to the real class names
 def normalise_finding(text: str) -> str:
-    text = text.lower()
+    # makes lowercase, strips of whitespace, removes punctuation
+    text = text.lower().strip().translate(str.maketrans('', '', string.punctuation))
+
+    # first checks for exact class name matches
+    for class_name in CLASSES:
+        if class_name.lower() in text:
+            return class_name
+    
+    # otherwise check synonyms
     for real_class, synonyms in CLASS_SYNONYMS.items():
-        if real_class in text:
-            return real_class
         for syn in synonyms:
-            if syn in text:
+            if syn.lower() in text:
                 return real_class
-    # fallback: exact match against class list
-    for cname in CLASSES:
-        if cname.lower() in text:
-            return cname
+            
+    # now check each word to find synonyms
+    text_words = re.findall(r'\b\w+\b', text)
+    
+    # list of key trigger words for each class
+    key_word_mappings = {
+        "aortic enlargement": ["tortuous"],
+        "atelectasis": ["atelectasis", "collapse"],
+        "calcification": ["calcified", "calcification"],
+        "cardiomegaly": ["cardiac"],
+        "consolidation": ["consolidation", "consolidative"],
+        "ild": ["interstitial"],
+        "infiltration": ["infiltrate", "infiltrates", "infiltration"],
+        "lung opacity": ["opacity", "opacification", "density"],
+        "nodule/mass": ["nodule", "nodular", "mass", "granuloma", "granulomas"],
+        "other lesion": ["emphysema", "lesion"],
+        "pleural effusion": ["effusion", "effusions"],
+        "pleural thickening": ["thickening"],
+        "pneumothorax": ["pneumothorax"],
+        "pulmonary fibrosis": ["fibrotic", "fibrosis"]
+    }
+    
+    # Check for key word matches
+
+    # check for any matches of key words
+    for class_name, key_words in key_word_mappings.items():
+        for key_word in key_words:
+            if key_word in text_words:
+                # tortuous only maps when other words are used (i.e. aorta, aortic, thoracic)
+                if key_word == "tortuous":
+                    if any(word in text_words for word in ["aorta", "aortic", "thoracic"]):
+                        return class_name
+                # cardic only maps when enlargement is mentioned
+                elif key_word == "cardiac":
+                    if any(word in text_words for word in ["enlarged", "enlargement", "silhouette", "size"]):
+                        return class_name
+                # opacity or opacification only maps to lung opacity
+                elif key_word in ["opacity", "opacification"]:
+                    # need to also check if its not matched to something else more specific
+                    if not any(specific_word in text_words for specific_word in 
+                              ["consolidation", "consolidative", "infiltrate", "effusion"]):
+                        return class_name
+                else:
+                    return class_name
+    
+    # fallback mechanism to check if any word from the main class name appears
+    for real_class in CLASSES:
+        class_words = re.findall(r'\b\w+\b', real_class.lower())
+        if any(word in text_words and len(word) > 3 for word in class_words):
+            return real_class
+    
     return None
 
 # defines colors for each class
@@ -263,6 +318,22 @@ def parse_suffix_to_detections(suffix_text: str, classes: List[str], img_size: T
         confidence=np.array(confs, dtype=float),
     )
 
+# extracts individual findings from maira output
+def extract_findings_from_maira_text(text: str):
+    # regex pattern to mwatch <obj> tags
+    obj_pattern = r'<obj>(.*?)</obj>'
+    findings = re.findall(obj_pattern, text, re.IGNORECASE | re.DOTALL)
+    
+    # cleans up the findings
+    cleaned_findings = []
+    for finding in findings:
+        # remove any more tags and clean whitespace
+        clean_finding = re.sub(r'<[^>]+>', '', finding).strip()
+        if clean_finding:
+            cleaned_findings.append(clean_finding)
+    
+    return cleaned_findings
+
 # converts the MAIRA-2 output into a Detections object
 # MAIRA-2 output is quite different than Florence-2, explicit class names aren't given
 # need to extract any class names mentioned in each part of the report
@@ -275,58 +346,81 @@ def parse_maira_prediction_to_detections(maira_list: List[Tuple[str, List[Tuple[
     class_ids = []
     confs = []
 
-    print(maira_list)
+    print(f"maira list: {maira_list}")
 
-    for finding_text, bboxes in maira_list:
-        if not isinstance(finding_text, str):
+    for item in maira_list:
+        # outputs dont always have bounding boxes
+        # need to handle different possible formats
+        if isinstance(item, tuple) and len(item) == 2:
+            finding_text, bboxes = item
+        elif isinstance(item, str):
+            finding_text = item
+            bboxes = None
+        else:
             continue
 
-        # skip negated findings
+        if not isinstance(finding_text, str) or not finding_text.strip():
+            continue
+
+        print(f"Processing finding: '{finding_text}'")
+
+        # skips negated findings
         if is_negated(finding_text):
+            print(f"Skipping negated finding: '{finding_text}'")
             continue
 
-        norm_finding = normalise_finding(finding_text)
-        if norm_finding is None or norm_finding not in CLASSES:
+        # tries to normalise the finding to a known class
+        normalised_class = normalise_finding(finding_text)
+        
+        if normalised_class is None or normalised_class not in CLASSES:
+            print(f"Could not map finding '{finding_text}' to any known class")
+
+            # fallback mechanism to extract individual findings from text if it has any <obj> tags
+            sub_findings = extract_findings_from_maira_text(finding_text)
+            for sub_finding in sub_findings:
+                if is_negated(sub_finding):
+                    continue
+                sub_normalised = normalise_finding(sub_finding)
+                if sub_normalised and sub_normalised in CLASSES:
+                    class_id = CLASSES.index(sub_normalised)
+                    # no localisaton given, add 1x1 bounding box in top left
+                    xyxy.append([1.0, 1.0, 2.0, 2.0])
+                    class_ids.append(class_id)
+                    confs.append(1.0)
+                    print(f"Mapped sub-finding '{sub_finding}' to class '{sub_normalised}'")
             continue
 
-        cid = CLASSES.index(norm_finding)
+        class_id = CLASSES.index(normalised_class)
+        print(f"Mapped finding '{finding_text}' to class '{normalised_class}' (ID: {class_id})")
 
-        if bboxes is not None and len(bboxes) > 0:  # maira sometimes responds with bboxes as None
-            for (x1n, y1n, x2n, y2n) in bboxes:
-                x1 = clamp(x1n * W, 0, W)
-                y1 = clamp(y1n * H, 0, H)
-                x2 = clamp(x2n * W, 0, W)
-                y2 = clamp(y2n * H, 0, H)
-                x_min, x_max = sorted([x1, x2])
-                y_min, y_max = sorted([y1, y2])
-                xyxy.append([x_min, y_min, x_max, y_max])
-                class_ids.append(cid)
-                confs.append(1.0)
+        # handles the bounding boxes
+        if bboxes is not None and len(bboxes) > 0:
+            for bbox in bboxes:
+                if len(bbox) == 4:
+                    x1n, y1n, x2n, y2n = bbox
+                    x1 = clamp(x1n * W, 0, W)
+                    y1 = clamp(y1n * H, 0, H)
+                    x2 = clamp(x2n * W, 0, W)
+                    y2 = clamp(y2n * H, 0, H)
+                    x_min, x_max = sorted([x1, x2])
+                    y_min, y_max = sorted([y1, y2])
+
+                    # makes sure the box has a min size
+                    if x_max - x_min < 1:
+                        x_max = x_min + 1
+                    if y_max - y_min < 1:
+                        y_max = y_min + 1
+                    
+                    xyxy.append([x_min, y_min, x_max, y_max])
+                    class_ids.append(class_id)
+                    confs.append(1.0)
         else:
             # keep class mention even without grounding
             xyxy.append([1.0, 1.0, 2.0, 2.0])  # just a 1x1 bounding box in the top left
-            class_ids.append(cid)
+            class_ids.append(class_id)
             confs.append(1.0)
 
-        # finding_lc = finding_text.lower()
-
-        # for cid, cname in enumerate(CLASSES):
-        #     if cname.lower() in finding_lc:
-        #         if bboxes is not None and len(bboxes) > 0:  # maira sometimes responds with bboxes as None
-        #             for (x1n, y1n, x2n, y2n) in bboxes:
-        #                 x1 = clamp(x1n * W, 0, W)
-        #                 y1 = clamp(y1n * H, 0, H)
-        #                 x2 = clamp(x2n * W, 0, W)
-        #                 y2 = clamp(y2n * H, 0, H)
-        #                 x_min, x_max = sorted([x1, x2])
-        #                 y_min, y_max = sorted([y1, y2])
-        #                 xyxy.append([x_min, y_min, x_max, y_max])
-        #                 class_ids.append(cid)
-        #                 confs.append(1.0)
-        #         else:  # keep class mention even without grounding
-        #             xyxy.append([1.0, 1.0, 2.0, 2.0])  # just a 1x1 bounding box in the top left
-        #             class_ids.append(cid)
-        #             confs.append(1.0)
+    print(f"Final detections: {len(xyxy)} boxes, classes: {class_ids}")
 
     if not xyxy:
         return sv.Detections.empty()
@@ -336,6 +430,67 @@ def parse_maira_prediction_to_detections(maira_list: List[Tuple[str, List[Tuple[
         class_id=np.array(class_ids, dtype=int),
         confidence=np.array(confs, dtype=float),
     )
+
+    # for finding_text, bboxes in maira_list:
+    #     if not isinstance(finding_text, str):
+    #         continue
+
+    #     # skip negated findings
+    #     if is_negated(finding_text):
+    #         continue
+
+    #     norm_finding = normalise_finding(finding_text)
+    #     if norm_finding is None or norm_finding not in CLASSES:
+    #         print("None finding")
+    #         continue
+
+    #     cid = CLASSES.index(norm_finding)
+
+    #     if bboxes is not None and len(bboxes) > 0:  # maira sometimes responds with bboxes as None
+    #         for (x1n, y1n, x2n, y2n) in bboxes:
+    #             x1 = clamp(x1n * W, 0, W)
+    #             y1 = clamp(y1n * H, 0, H)
+    #             x2 = clamp(x2n * W, 0, W)
+    #             y2 = clamp(y2n * H, 0, H)
+    #             x_min, x_max = sorted([x1, x2])
+    #             y_min, y_max = sorted([y1, y2])
+    #             xyxy.append([x_min, y_min, x_max, y_max])
+    #             class_ids.append(cid)
+    #             confs.append(1.0)
+    #     else:
+    #         # keep class mention even without grounding
+    #         xyxy.append([1.0, 1.0, 2.0, 2.0])  # just a 1x1 bounding box in the top left
+    #         class_ids.append(cid)
+    #         confs.append(1.0)
+
+    #     # finding_lc = finding_text.lower()
+
+    #     # for cid, cname in enumerate(CLASSES):
+    #     #     if cname.lower() in finding_lc:
+    #     #         if bboxes is not None and len(bboxes) > 0:  # maira sometimes responds with bboxes as None
+    #     #             for (x1n, y1n, x2n, y2n) in bboxes:
+    #     #                 x1 = clamp(x1n * W, 0, W)
+    #     #                 y1 = clamp(y1n * H, 0, H)
+    #     #                 x2 = clamp(x2n * W, 0, W)
+    #     #                 y2 = clamp(y2n * H, 0, H)
+    #     #                 x_min, x_max = sorted([x1, x2])
+    #     #                 y_min, y_max = sorted([y1, y2])
+    #     #                 xyxy.append([x_min, y_min, x_max, y_max])
+    #     #                 class_ids.append(cid)
+    #     #                 confs.append(1.0)
+    #     #         else:  # keep class mention even without grounding
+    #     #             xyxy.append([1.0, 1.0, 2.0, 2.0])  # just a 1x1 bounding box in the top left
+    #     #             class_ids.append(cid)
+    #     #             confs.append(1.0)
+
+    # if not xyxy:
+    #     return sv.Detections.empty()
+
+    # return sv.Detections(
+    #     xyxy=np.array(xyxy, dtype=float),
+    #     class_id=np.array(class_ids, dtype=int),
+    #     confidence=np.array(confs, dtype=float),
+    # )
 
 # handles cases where maira-2 repeats findings cyclically
 def clean_repetitive_generation(decoded_text):
@@ -400,6 +555,7 @@ with open(ANNOTATIONS_JSON, "r") as f:
         targets.append(gt)
 
         # model forward
+        # we only have frontal x-rays
         inputs = processor.format_and_preprocess_reporting_input(
             current_frontal=image,
             current_lateral=None,

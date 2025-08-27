@@ -16,6 +16,8 @@ from tensorflow.keras.metrics import AUC
 from tensorflow.keras import mixed_precision
 import tensorflow as tf
 
+print("RUNNING: ENSEMBLE TRAINING")
+
 # Dataset configuration
 DATA_DIR = 'output_dataset'
 TRAIN_DIR = os.path.join(DATA_DIR, 'train')
@@ -239,6 +241,16 @@ def create_ensemble_model(n_classes=N_CLASSES, input_shape=(1500, 1500, 3)):
 # Create ensemble model
 print("Creating ensemble model...")
 model = create_ensemble_model(N_CLASSES)
+
+# gets total number of parameters
+total_params = model.count_params()
+trainable_params = np.sum([np.prod(v.get_shape()) for v in model.trainable_weights])
+non_trainable_params = np.sum([np.prod(v.get_shape()) for v in model.non_trainable_weights])
+
+print(f"Total params: {total_params:,}")
+print(f"Trainable params: {trainable_params:,}")
+print(f"Non-trainable params: {non_trainable_params:,}")
+
 
 # # print model summary
 # # this summary is VERY long

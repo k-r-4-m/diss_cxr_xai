@@ -89,11 +89,7 @@ def run_florence_task(task_prompt, image, text_input=None):
     else:
         prompt = task_prompt + text_input
 
-    inputs = processor(
-        text=prompt,
-        images=image,
-        return_tensors="pt"
-    ).to(DEVICE, torch.float32)
+    inputs = processor(text=prompt, images=image, return_tensors="pt").to(DEVICE, torch.float32)
 
     generated_ids = model.generate(
         input_ids=inputs["input_ids"],
@@ -106,10 +102,7 @@ def run_florence_task(task_prompt, image, text_input=None):
         return_dict_in_generate=True
     )
 
-    generated_text = processor.batch_decode(
-        generated_ids.sequences,
-        skip_special_tokens=False
-    )[0]
+    generated_text = processor.batch_decode(generated_ids.sequences, skip_special_tokens=False)[0]
 
     parsed_answer = processor.post_process_generation(
         generated_text,
@@ -179,7 +172,7 @@ for i in range(len(val_dataset.dataset)):
     prediction.class_id = np.array([CLASSES.index(name) for name in fuzzy_class_names])
     prediction.confidence = np.ones(len(prediction))  # florence-2 doesn't output confidence
 
-    # Ground truth conversion
+    # ground truth conversion
     cleaned_suffix = clean_suffix(suffix)
     target = processor.post_process_generation(
         cleaned_suffix,

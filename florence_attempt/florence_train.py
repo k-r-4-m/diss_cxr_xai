@@ -32,6 +32,8 @@ import html
 import base64
 import itertools
 
+print("RUNNING: FLORENCE TRAINING")
+
 # loads the config file for epochs, revision, pathnames, etc.
 config_path = "./config.yaml"
 config = load_config(config_path)

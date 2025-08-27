@@ -32,6 +32,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from pathvalidate import sanitize_filename
 
+print("RUNNING: MAIRA EVALUATION")
+
 # loads the config.yaml file for model configuration
 def load_config(config_path):
     with open(config_path, 'r') as f:
@@ -58,14 +60,6 @@ CLASSES = df['class_name'].unique().tolist()
 if "No finding" in CLASSES:
     CLASSES.remove("No finding")
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-CHECKPOINT = "microsoft/maira-2"
-model = AutoModelForCausalLM.from_pretrained(CHECKPOINT, trust_remote_code=True)
-processor = AutoProcessor.from_pretrained(CHECKPOINT, trust_remote_code=True)
-
-model = model.eval()
-model = model.to(DEVICE)
-
 # a dictionary to map synonyms for classes
 # this is because MAIRA-2 will refer to classes by different names/terms
 # not all classes will have synonyms
@@ -86,16 +80,15 @@ CLASS_SYNONYMS = {
     "pulmonary fibrosis": ["interstitial fibrotic"],
 }
 
+# makes both CLASSES and CLASS_SYNONYMS lowercase
+CLASS_CANON = {c.lower(): c for c in CLASSES}
+CLASS_SYNONYMS_LOWER = {k.lower(): [s.lower() for s in v] for k, v in CLASS_SYNONYMS.items()}
+
 # patterns for when a finding is mentioned but the model says it isnt present
 NEGATION_PATTERNS = [
-    r"\bno\b",
-    r"\bwithout\b",
-    r"\bnot seen\b",
-    r"\babsent\b",
-    r"\bfree of\b",
-    r"\bclear\b",
-    r"\bunremarkable\b",
-    r"\bnormal\b"
+    r"\bno\b", r"\bwithout\b", r"\bnot seen\b", r"\babsent\b",
+    r"\bfree of\b", r"\bclear\b", r"\bunremarkable\b", r"\bnormal\b",
+    r"\bno evidence of\b", r"\bno signs of\b", r"\bnegative for\b",
 ]
 
 # returns true if a finding contains a phrase in NEGATION_PATTERNS
@@ -105,182 +98,39 @@ def is_negated(text: str) -> bool:
 
 # maps the synonyms/variations of findings found in CLASS_SYNONYMS back to the real class names
 def normalise_finding(text: str) -> str:
-    # makes lowercase, strips of whitespace, removes punctuation
-    text = text.lower().strip().translate(str.maketrans('', '', string.punctuation))
+
+    if not text or not isinstance(text, str):
+        return None
+
+    text_lc = text.lower().strip()  # make the text lowercase and strip whitespace
+    # remove punctuation but keep slashes/hyphens because some class names use them (nodule/mass)
+    text_lc = text_lc.translate(str.maketrans('', '', string.punctuation.replace('/', '').replace('-', '')))
 
     # first checks for exact class name matches
-    for class_name in CLASSES:
-        if class_name.lower() in text:
-            return class_name
+    for c_lc, canonical in CLASS_CANON.items():
+        if c_lc in text_lc:
+            return canonical
     
     # otherwise check if a full synonym phrase appears
-    for real_class, synonyms in CLASS_SYNONYMS.items():
-        for syn in synonyms:
-            if syn.lower() in text:
-                return real_class
+    for real_lc, syns in CLASS_SYNONYMS_LOWER.items():
+        for syn in syns:
+            if syn in text_lc:
+                return CLASS_CANON.get(real_lc, None)
             
     # final check to check each word for synonyms
-    text_words = re.findall(r'\b\w+\b', text)
-    
-    for class_name, synonyms in CLASS_SYNONYMS.items():
-        for synonym in synonyms:
-            synonym_words = re.findall(r'\b\w+\b', synonym.lower())
-            for word in synonym_words:
-                if len(word) > 3 and word in text_words:  # only get actual words
-                    print(f"found word match: '{word}' from synonym '{synonym}' -> {class_name}")
-                    # for other words, return immediately
-                    return class_name
-    
+    text_words = set(re.findall(r'\b\w+\b', text_lc))
+    for real_lc, syns in CLASS_SYNONYMS_LOWER.items():
+        for syn in syns:
+            for w in re.findall(r'\b\w+\b', syn):
+                if len(w) > 3 and w in text_words:
+                    if w == "tortuous":  # special case for "aortic"
+                        # only map to aortic enlargement if aortic context present
+                        if any(ctx in text_words for ctx in ["aorta", "aortic", "thoracic"]):
+                            return CLASS_CANON.get(real_lc, None)
+                        continue
+                    return CLASS_CANON.get(real_lc, None)
+
     return None
-
-    # # list of key trigger words for each class
-    # key_word_mappings = {
-    #     "aortic enlargement": ["tortuous"],
-    #     "atelectasis": ["atelectasis", "collapse"],
-    #     "calcification": ["calcified", "calcification"],
-    #     "cardiomegaly": ["cardiac"],
-    #     "consolidation": ["consolidation", "consolidative"],
-    #     "ild": ["interstitial"],
-    #     "infiltration": ["infiltrate", "infiltrates", "infiltration"],
-    #     "lung opacity": ["opacity", "opacification", "density"],
-    #     "nodule/mass": ["nodule", "nodular", "mass", "granuloma", "granulomas"],
-    #     "other lesion": ["emphysema", "lesion"],
-    #     "pleural effusion": ["effusion", "effusions"],
-    #     "pleural thickening": ["thickening"],
-    #     "pneumothorax": ["pneumothorax"],
-    #     "pulmonary fibrosis": ["fibrotic", "fibrosis"]
-    # }
-    
-    # # Check for key word matches
-
-    # # check for any matches of key words
-    # for class_name, key_words in key_word_mappings.items():
-    #     for key_word in key_words:
-    #         if key_word in text_words:
-    #             # tortuous only maps when other words are used (i.e. aorta, aortic, thoracic)
-    #             if key_word == "tortuous":
-    #                 if any(word in text_words for word in ["aorta", "aortic", "thoracic"]):
-    #                     return class_name
-    #             # cardic only maps when enlargement is mentioned
-    #             elif key_word == "cardiac":
-    #                 if any(word in text_words for word in ["enlarged", "enlargement", "silhouette", "size"]):
-    #                     return class_name
-    #             # opacity or opacification only maps to lung opacity
-    #             elif key_word in ["opacity", "opacification"]:
-    #                 # need to also check if its not matched to something else more specific
-    #                 if not any(specific_word in text_words for specific_word in 
-    #                           ["consolidation", "consolidative", "infiltrate", "effusion"]):
-    #                     return class_name
-    #             else:
-    #                 return class_name
-    
-    # # fallback mechanism to check if any word from the main class name appears
-    # for real_class in CLASSES:
-    #     class_words = re.findall(r'\b\w+\b', real_class.lower())
-    #     if any(word in text_words and len(word) > 3 for word in class_words):
-    #         return real_class
-    
-    # return None
-
-# defines colors for each class
-# used to draw bounding boxes
-CLASS_COLORS = plt.cm.Set3(np.linspace(0, 1, len(CLASSES)))
-CLASS_COLOR_MAP = {cls: tuple(int(c*255) for c in CLASS_COLORS[i][:3]) for i, cls in enumerate(CLASSES)} 
-
-# clamps bounding boxes
-def clamp(v, lo, hi):
-    return max(lo, min(hi, v))
-
-# regex pattern to capture the label and the loc tags
-GT_PATTERN = re.compile(
-    r"([A-Za-z0-9 _\-/]+?)\s*<loc_(\d+)><loc_(\d+)><loc_(\d+)><loc_(\d+)>"
-)
-
-# function to draw bounding boxes on image
-def draw_bboxes_on_image(image, detections, title, class_names):
-    img_with_boxes = image.copy()
-    draw = ImageDraw.Draw(img_with_boxes)
-    try:
-    # Try to use a default font, fallback to default if not available
-        font = ImageFont.truetype("arial.ttf", 16)
-    except (OSError, IOError):
-        font = ImageFont.load_default()
-    if len(detections) > 0:
-        for i, (bbox, class_id) in enumerate(zip(detections.xyxy, detections.class_id)):
-            x1, y1, x2, y2 = bbox
-            class_name = class_names[class_id]
-            color = CLASS_COLOR_MAP.get(class_name, (255, 0, 0))  # Default to red if class not found
-
-            # Draw bounding box
-            draw.rectangle([x1, y1, x2, y2], outline=color, width=3)
-
-            # Draw label background
-            text_bbox = draw.textbbox((x1, y1-25), class_name, font=font)
-            draw.rectangle(text_bbox, fill=color)
-
-            # Draw label text
-            draw.text((x1, y1-25), class_name, fill=(255, 255, 255), font=font)
-
-    return img_with_boxes
-
-# plots the two bounding boxed images side by side
-def create_side_by_side_visualization(image, gt_detections, pred_detections, class_names, image_name, save_dir="visualizations"):
-    os.makedirs(save_dir, exist_ok=True)
-    # Draw bboxes on images
-    gt_image = draw_bboxes_on_image(image, gt_detections, "Ground Truth", class_names)
-    pred_image = draw_bboxes_on_image(image, pred_detections, "Predictions", class_names)
-
-    # Create side-by-side plot
-    fig, axes = plt.subplots(1, 2, figsize=(20, 10))
-
-    # Ground truth subplot
-    axes[0].imshow(gt_image)
-    axes[0].set_title(f"Ground Truth - {image_name}", fontsize=14, fontweight='bold')
-    axes[0].axis('off')
-    # Add ground truth statistics
-    gt_counts = {}
-
-    if len(gt_detections) > 0:
-        for class_id in gt_detections.class_id:
-            class_name = class_names[class_id]
-            gt_counts[class_name] = gt_counts.get(class_name, 0) + 1
-
-    gt_text = "GT Classes:\n" + "\n".join([f"{cls}: {count}" for cls, count in gt_counts.items()]) if gt_counts else "GT Classes: None"
-    axes[0].text(0.02, 0.98, gt_text, transform=axes[0].transAxes, fontsize=10,
-                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-
-    # Predictions subplot
-    axes[1].imshow(pred_image)
-    axes[1].set_title(f"Predictions - {image_name}", fontsize=14, fontweight='bold')
-    axes[1].axis('off')
-	
-    # Add prediction statistics
-    pred_counts = {}
-    if len(pred_detections) > 0:
-        for class_id in pred_detections.class_id:
-            class_name = class_names[class_id]
-            pred_counts[class_name] = pred_counts.get(class_name, 0) + 1
-
-    pred_text = "Pred Classes:\n" + "\n".join([f"{cls}: {count}" for cls, count in pred_counts.items()]) if pred_counts else "Pred Classes: None"
-    axes[1].text(0.02, 0.98, pred_text, transform=axes[1].transAxes, fontsize=10,
-                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-
-    # Add color legend
-    legend_elements = []
-    for class_name, color in CLASS_COLOR_MAP.items():
-        legend_elements.append(plt.Rectangle((0,0),1,1, facecolor=[c/255 for c in color], label=class_name))
-
-    fig.legend(handles=legend_elements, loc='upper center', bbox_to_anchor=(0.5, 0.02),
-               ncol=min(len(CLASSES), 6), fontsize=10)
-
-    plt.tight_layout()
-
-    # Save the visualization
-    save_path = os.path.join(save_dir, f"{sanitize_filename(image_name)}_comparison.png")
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    plt.close()
-
-    return save_path 
 
 # parses the ground truth suffixess
 def parse_suffix_to_detections(suffix_text: str, classes: List[str], img_size: Tuple[int, int]) -> sv.Detections:
@@ -343,101 +193,105 @@ def extract_findings_from_maira_text(text: str):
     
     return cleaned_findings
 
+# normalise the maira processer outputs to a list
+def _coerce_maira_items(maira_output):
+    items = []
+    if maira_output is None:
+        return items
+
+    for it in maira_output:
+        if isinstance(it, tuple) and len(it) == 2:
+            items.append(it)
+        elif isinstance(it, str):
+            items.append((it, None))
+        elif isinstance(it, dict):
+            # seen the shapes: {"text": "...", "boxes": [[...], ...]} or similar
+            txt = it.get("text") or it.get("finding") or it.get("label") or ""
+            boxes = it.get("boxes") or it.get("bboxes") or it.get("bbox") or None
+            # makes sure boxes is list of 4-lists if present
+            if boxes is not None and isinstance(boxes, (list, tuple)):
+                if len(boxes) == 4 and all(isinstance(x, (int, float)) for x in boxes):
+                    boxes = [boxes]
+            items.append((txt, boxes))
+        # skip unknown shapes
+    return items
+
+# makes sure values are pixels and not normalised values
+def _to_pixel_box(b, W, H):
+    x1, y1, x2, y2 = [float(v) for v in b]
+
+    mx = max(abs(x1), abs(y1), abs(x2), abs(y2))
+    if mx <= 1.0 + 1e-6:
+        # 0..1
+        x1, y1, x2, y2 = x1 * W, y1 * H, x2 * W, y2 * H
+    elif mx <= 1000.0 + 1e-6:
+        # 0..1000
+        x1, y1, x2, y2 = (x1 / 1000.0) * W, (y1 / 1000.0) * H, (x2 / 1000.0) * W, (y2 / 1000.0) * H
+    # else: already pixels
+
+    x_min, x_max = sorted([clamp(x1, 0, W), clamp(x2, 0, W)])
+    y_min, y_max = sorted([clamp(y1, 0, H), clamp(y2, 0, H)])
+    if x_max - x_min < 1: x_max = x_min + 1
+    if y_max - y_min < 1: y_max = y_min + 1
+    return [x_min, y_min, x_max, y_max]
+
 # converts the MAIRA-2 output into a Detections object
 # MAIRA-2 output is quite different than Florence-2, explicit class names aren't given
 # need to extract any class names mentioned in each part of the report
-def parse_maira_prediction_to_detections(maira_list: List[Tuple[str, List[Tuple[float, float, float, float]]]], img_size: Tuple[int, int],) -> sv.Detections:
-    if not maira_list:
+def parse_maira_prediction_to_detections(maira_output, img_size: Tuple[int, int],) -> sv.Detections:
+    
+    if not maira_output:
         return sv.Detections.empty()
 
     W, H = img_size
-    xyxy = []
-    class_ids = []
-    confs = []
+    xyxy, class_ids, confs = [], [], []
 
-    print(f"maira list: {maira_list}")
+    items = _coerce_maira_items(maira_output)
+    # print(f"MAIRA coerced items: {items}")
 
-    for item in maira_list:
-        # outputs dont always have bounding boxes
-        # need to handle different possible formats
-        if isinstance(item, tuple) and len(item) == 2:
-            finding_text, bboxes = item
-        elif isinstance(item, str):
-            finding_text = item
-            bboxes = None
-        else:
-            continue
-
+    for (finding_text, bboxes) in items:
         if not isinstance(finding_text, str) or not finding_text.strip():
             continue
 
-        print(f"Processing finding: '{finding_text}'")
-
-        # skips negated findings
+        # skip findings that are "negated"
+        # i.e. maira says this finding is NOT present
         if is_negated(finding_text):
-            print(f"Skipping negated finding: '{finding_text}'")
+            # print(f"Skipping negated: {finding_text}")
             continue
 
-        # tries to normalise the finding to a known class
-        normalised_class = normalise_finding(finding_text)
-        
-        if normalised_class is None:
-            # Try extracting individual findings if text contains <obj> tags
-            sub_findings = extract_findings_from_maira_text(finding_text)
-            for sub_finding in sub_findings:
-                if not is_negated(sub_finding):
-                    sub_mapped = normalise_finding(sub_finding)
-                    if sub_mapped:
-                        class_id = CLASSES.index(sub_mapped)
-                        # no localisaton given, add 1x1 bounding box in top left
-                        xyxy.append([1.0, 1.0, 2.0, 2.0])
-                        class_ids.append(class_id)
+        # maps the finding to a class
+        mapped = normalise_finding(finding_text)
+        if mapped is None:
+            # try within <obj>...</obj> chunks (if present)
+            for sub in extract_findings_from_maira_text(finding_text):
+                if not is_negated(sub):
+                    mapped_sub = normalise_finding(sub)
+                    if mapped_sub is not None:
+                        cid = CLASSES.index(mapped_sub)
+                        xyxy.append([1.0, 1.0, 2.0, 2.0])  # retain mention, place small box in top left
+                        class_ids.append(cid)
                         confs.append(1.0)
-                        print(f"  Mapped sub-finding '{sub_finding}' -> {sub_mapped}")
             continue
-        
-        if normalised_class not in CLASSES:
-            print(f"Mapped class '{normalised_class}' not in classes list!")
-            continue
-            
-        class_id = CLASSES.index(normalised_class)
-        print(f"  Final mapping: '{finding_text}' -> {normalised_class} (ID: {class_id})")
-        
+
+        # converts class to class id
+        cid = CLASSES.index(mapped)
+
         # handles bounding boxes
         if bboxes and len(bboxes) > 0:
-            for bbox in bboxes:
-                if len(bbox) == 4:
-                    x1, y1, x2, y2 = bbox
-                    # converts normalised coords to pixels
-                    x1_px = max(0, min(W, x1 * W))
-                    y1_px = max(0, min(H, y1 * H))
-                    x2_px = max(0, min(W, x2 * W))
-                    y2_px = max(0, min(H, y2 * H))
-                    
-                    # ensures valid box
-                    x_min, x_max = sorted([x1_px, x2_px])
-                    y_min, y_max = sorted([y1_px, y2_px])
-                    
-                    if x_max - x_min < 1:
-                        x_max = x_min + 1
-                    if y_max - y_min < 1:
-                        y_max = y_min + 1
-                    
-                    xyxy.append([x_min, y_min, x_max, y_max])
-                    class_ids.append(class_id)
+            for b in bboxes:
+                if isinstance(b, (list, tuple)) and len(b) == 4:
+                    xyxy.append(_to_pixel_box(b, W, H))
+                    class_ids.append(cid)
                     confs.append(1.0)
         else:
-            # keep class mention even without grounding
-            xyxy.append([1.0, 1.0, 2.0, 2.0])  # just a 1x1 bounding box in the top left
-            class_ids.append(class_id)
+            # keep ungrounded class mentions as 1x1 box in top left
+            xyxy.append([1.0, 1.0, 2.0, 2.0])
+            class_ids.append(cid)
             confs.append(1.0)
-    
-    print(f"\nFinal result: {len(xyxy)} detections")
-    print(f"Classes: {[CLASSES[cid] for cid in class_ids]}")
-    
+
     if not xyxy:
         return sv.Detections.empty()
-    
+
     return sv.Detections(
         xyxy=np.array(xyxy, dtype=float),
         class_id=np.array(class_ids, dtype=int),
@@ -547,6 +401,125 @@ def clean_repetitive_generation(decoded_text):
         return ''.join(cleaned_parts)
     
     return decoded_text
+
+
+### bounding box stuff
+# defines colors for each class
+# used to draw bounding boxes
+CLASS_COLORS = plt.cm.Set3(np.linspace(0, 1, len(CLASSES)))
+CLASS_COLOR_MAP = {cls: tuple(int(c*255) for c in CLASS_COLORS[i][:3]) for i, cls in enumerate(CLASSES)} 
+
+# clamps bounding boxes
+def clamp(v, lo, hi):
+    return max(lo, min(hi, v))
+
+# regex pattern to capture the label and the loc tags
+GT_PATTERN = re.compile(
+    r"([A-Za-z0-9 _\-/]+?)\s*<loc_(\d+)><loc_(\d+)><loc_(\d+)><loc_(\d+)>"
+)
+
+# function to draw bounding boxes on image
+def draw_bboxes_on_image(image, detections, title, class_names):
+    img_with_boxes = image.copy()
+    draw = ImageDraw.Draw(img_with_boxes)
+    try:
+    # Try to use a default font, fallback to default if not available
+        font = ImageFont.truetype("arial.ttf", 16)
+    except (OSError, IOError):
+        font = ImageFont.load_default()
+    if len(detections) > 0:
+        for i, (bbox, class_id) in enumerate(zip(detections.xyxy, detections.class_id)):
+            x1, y1, x2, y2 = bbox
+            class_name = class_names[class_id]
+            color = CLASS_COLOR_MAP.get(class_name, (255, 0, 0))  # Default to red if class not found
+
+            # Draw bounding box
+            draw.rectangle([x1, y1, x2, y2], outline=color, width=3)
+
+            # Draw label background
+            text_bbox = draw.textbbox((x1, y1-25), class_name, font=font)
+            draw.rectangle(text_bbox, fill=color)
+
+            # Draw label text
+            draw.text((x1, y1-25), class_name, fill=(255, 255, 255), font=font)
+
+    return img_with_boxes
+
+# plots the two bounding boxed images side by side
+def create_side_by_side_visualization(image, gt_detections, pred_detections, class_names, image_name, save_dir="visualizations"):
+    os.makedirs(save_dir, exist_ok=True)
+    # Draw bboxes on images
+    gt_image = draw_bboxes_on_image(image, gt_detections, "Ground Truth", class_names)
+    pred_image = draw_bboxes_on_image(image, pred_detections, "Predictions", class_names)
+
+    # Create side-by-side plot
+    fig, axes = plt.subplots(1, 2, figsize=(20, 10))
+
+    # Ground truth subplot
+    axes[0].imshow(gt_image)
+    axes[0].set_title(f"Ground Truth - {image_name}", fontsize=14, fontweight='bold')
+    axes[0].axis('off')
+    # Add ground truth statistics
+    gt_counts = {}
+
+    if len(gt_detections) > 0:
+        for class_id in gt_detections.class_id:
+            class_name = class_names[class_id]
+            gt_counts[class_name] = gt_counts.get(class_name, 0) + 1
+
+    gt_text = "GT Classes:\n" + "\n".join([f"{cls}: {count}" for cls, count in gt_counts.items()]) if gt_counts else "GT Classes: None"
+    axes[0].text(0.02, 0.98, gt_text, transform=axes[0].transAxes, fontsize=10,
+                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+
+    # Predictions subplot
+    axes[1].imshow(pred_image)
+    axes[1].set_title(f"Predictions - {image_name}", fontsize=14, fontweight='bold')
+    axes[1].axis('off')
+	
+    # Add prediction statistics
+    pred_counts = {}
+    if len(pred_detections) > 0:
+        for class_id in pred_detections.class_id:
+            class_name = class_names[class_id]
+            pred_counts[class_name] = pred_counts.get(class_name, 0) + 1
+
+    pred_text = "Pred Classes:\n" + "\n".join([f"{cls}: {count}" for cls, count in pred_counts.items()]) if pred_counts else "Pred Classes: None"
+    axes[1].text(0.02, 0.98, pred_text, transform=axes[1].transAxes, fontsize=10,
+                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+
+    # Add color legend
+    legend_elements = []
+    for class_name, color in CLASS_COLOR_MAP.items():
+        legend_elements.append(plt.Rectangle((0,0),1,1, facecolor=[c/255 for c in color], label=class_name))
+
+    fig.legend(handles=legend_elements, loc='upper center', bbox_to_anchor=(0.5, 0.02),
+               ncol=min(len(CLASSES), 6), fontsize=10)
+
+    plt.tight_layout()
+
+    # Save the visualization
+    save_path = os.path.join(save_dir, f"{sanitize_filename(image_name)}_comparison.png")
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+    return save_path 
+
+
+### builds model
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+CHECKPOINT = "microsoft/maira-2"
+model = AutoModelForCausalLM.from_pretrained(CHECKPOINT, trust_remote_code=True)
+processor = AutoProcessor.from_pretrained(CHECKPOINT, trust_remote_code=True)
+
+model = model.eval()
+model = model.to(DEVICE)
+
+# gets num of total parameters
+total_params = sum(p.numel() for p in model.parameters())
+trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+print(f"Total parameters: {total_params:,}")
+print(f"Trainable parameters: {trainable_params:,}")
 
 ### runs eval loop
 predictions = []
@@ -687,7 +660,7 @@ for cls in CLASSES:
           f"recall = {recall_per_class[cls]:.3f}, "
           f"f1 = {f1_per_class[cls]:.3f}")
 
-print("\nOverall precision, recall, F1:")
+print("\nIoU precision, recall, F1:")
 print(f"precision = {overall_precision:.3f}")
 print(f"recall = {overall_recall:.3f}")
 print(f"f1 = {overall_f1:.3f}")
@@ -709,7 +682,7 @@ precision_cls, recall_cls, f1_cls, _ = precision_recall_fscore_support(
     y_true_multi, y_pred_multi, average="macro", zero_division=0
 )
 
-print("\nClassification-style metrics ")
+print("\nClassification-style precision, recall, F1:")
 print(f"precision = {precision_cls:.3f}")
 print(f"recall = {recall_cls:.3f}")
 print(f"f1 = {f1_cls:.3f}")

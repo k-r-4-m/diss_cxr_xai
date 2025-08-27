@@ -1,20 +1,22 @@
-"""
-    Takes 14 different binary confusion matrices and fuses them into one image
-"""
-
 from PIL import Image
 import os
 
-# --- Configuration ---
 input_folder = "C:/Users/Mark/Downloads/confusion_matrices_no_defs"  # folder containing confusion matrices
 output_file = "all_conf_matrix.png"
 images_per_row = 3
-padding = 10  
+padding = 350
+scale_factor = 2.0
 
 # sorts images alphabetically
 image_files = sorted([f for f in os.listdir(input_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
 
-images = [Image.open(os.path.join(input_folder, f)) for f in image_files]
+# load + resize images
+images = []
+for f in image_files:
+    img = Image.open(os.path.join(input_folder, f))
+    # scales the images
+    img = img.resize((int(img.width * scale_factor), int(img.height * scale_factor)), Image.LANCZOS)
+    images.append(img)
 
 # max width and height for each grid cell
 max_width = max(img.width for img in images)

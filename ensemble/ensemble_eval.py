@@ -11,6 +11,8 @@ import seaborn as sns
 import re
 import tensorflow as tf
 
+print("RUNNING: ENSEMBLE EVALUATION")
+
 DATA_DIR = 'output_dataset'
 VALID_DIR = os.path.join(DATA_DIR, 'valid')
 VALID_JSONL = os.path.join(VALID_DIR, 'annotations.jsonl')

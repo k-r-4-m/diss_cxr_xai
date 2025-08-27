@@ -34,6 +34,8 @@ import html
 import base64
 import itertools
 
+print("RUNNING: FLORENCE EVALUATION")
+
 # loads the config file for epochs, revision, pathnames, etc.
 config_path = "./config.yaml"
 config = load_config(config_path)
@@ -88,6 +90,7 @@ for i in range(len(val_dataset.dataset)):
 
     # gets the output from florence-2
     inputs = processor(text=prefix, images=image, return_tensors="pt").to(DEVICE)
+    
     generated_ids = model.generate(
         input_ids=inputs["input_ids"],
         pixel_values=inputs["pixel_values"],

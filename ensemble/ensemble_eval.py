@@ -244,7 +244,7 @@ for i, label in enumerate(CLASSES):
     reordered_cm = np.array([[tp, fn],
                              [fp, tn]])
 
-    plt.figure(figsize=(5, 4))
+    plt.figure(figsize=(4, 3))
     sns.heatmap(
         reordered_cm,
         annot=True,
@@ -253,7 +253,7 @@ for i, label in enumerate(CLASSES):
         xticklabels=["Positive", "Negative"],
         yticklabels=["Positive", "Negative"]
     )
-    plt.title(f"Joint Ensemble - {label}", fontsize=12)
+    plt.title(f"{label}")
     plt.xlabel("Predicted")
     plt.ylabel("True")
     plt.tight_layout()

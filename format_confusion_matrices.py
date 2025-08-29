@@ -1,8 +1,8 @@
 from PIL import Image
 import os
 
-input_folder = "C:/Users/Mark/Downloads/confusion_matrices_no_defs"  # folder containing confusion matrices
-output_file = "all_conf_matrix.png"
+input_folder = "C:/Users/Mark/Downloads/Final results/confusion_matrices_maira2"  # folder containing confusion matrices
+output_file = "all_conf_matrix_maira.png"
 images_per_row = 3
 padding = 350
 scale_factor = 2.0

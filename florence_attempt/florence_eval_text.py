@@ -10,6 +10,7 @@ from florence_tools import *
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 from rouge_score import rouge_scorer
 from florence_tools import load_config
+import re
 
 print("RUNNING: FLORENCE CAPTIONING EVALUATION")
 
@@ -46,11 +47,24 @@ val_dataset = DetectionDataset(
 results_jsonl = os.path.join(OUTPUT_DIR, "caption_eval.jsonl")
 results_file = open(results_jsonl, "w")
 
+# smoothing function for BLEU
+smooth_fn = SmoothingFunction().method1
+
+# initialises the rouge scoring function
+scorer = rouge_scorer.RougeScorer(["rougeL"], use_stemmer=True)
+
+# normalises the text for BLEU
+def tokenise(text):
+    text = text.lower()
+    text = re.sub(r"[^\w\s]", "", text)  # removes punctuation
+    return text.split()
+
 targets = []
 predictions = []
 
 ### eval loop
 for i in tqdm(range(len(val_dataset.dataset))):
+# for i in range(10):
     image, data = val_dataset.dataset[i]
 
     # florence needs RGB images, images in padchest are greyscale
@@ -73,28 +87,49 @@ for i in tqdm(range(len(val_dataset.dataset))):
     predictions.append(generated_text)
     targets.append(reference_caption)
 
-    # writes to jsonl file 
+    # tokenises the text
+    ref_tokens = tokenise(reference_caption)
+    pred_tokens = tokenise(generated_text)
+
+    # calculates BLEU scores
+    bleu1 = sentence_bleu([ref_tokens], pred_tokens, weights=(1, 0, 0, 0), smoothing_function=smooth_fn)
+    bleu4 = sentence_bleu([ref_tokens], pred_tokens, weights=(0.25, 0.25, 0.25, 0.25), smoothing_function=smooth_fn)
+
+    # calculates ROUGE-L score
+    rougeL = scorer.score(reference_caption, generated_text)["rougeL"].fmeasure
+
+    # writes everything to jsonl
     results_file.write(json.dumps({
         "image": data["image"],
         "reference": reference_caption,
-        "prediction": generated_text
+        "prediction": generated_text,
+        "bleu1": bleu1,
+        "bleu4": bleu4,
+        "rougeL": rougeL
     }) + "\n")
 
 results_file.close()
 
 ### metrics
 smooth_fn = SmoothingFunction().method1
-bleu_scores = [
-    sentence_bleu([ref.split()], pred.split(), smoothing_function=smooth_fn)
+
+bleu1_scores = [
+    sentence_bleu([ref.split()], pred.split(), weights=(1), smoothing_function=smooth_fn)
     for ref, pred in zip(targets, predictions)
 ]
-avg_bleu = sum(bleu_scores) / len(bleu_scores)
+bleu4_scores = [
+    sentence_bleu([ref.split()], pred.split(), weights=(1./4., 1./4., 1./4., 1./4.), smoothing_function=smooth_fn)
+    for ref, pred in zip(targets, predictions)
+]
 
-scorer = rouge_scorer.RougeScorer(["rougeL"], use_stemmer=True)
+avg_bleu1 = sum(bleu1_scores) / len(bleu1_scores)
+avg_bleu4 = sum(bleu4_scores) / len(bleu4_scores)
+
 rouge_scores = [scorer.score(ref, pred)["rougeL"].fmeasure for ref, pred in zip(targets, predictions)]
 avg_rougeL = sum(rouge_scores) / len(rouge_scores)
 
 print(f"\nEvaluation finished at {datetime.now()}")
-print(f"BLEU score: {avg_bleu:.4f}")
+print(f"BLEU-1 score: {avg_bleu1:.4f}")
+print(f"BLEU-4 score: {avg_bleu4:.4f}")
 print(f"ROUGE-L score: {avg_rougeL:.4f}")
 print(f"Results written to {results_jsonl}")

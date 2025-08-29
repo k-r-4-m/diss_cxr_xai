@@ -50,3 +50,21 @@ maira-2/paste3.py
 .vscode
 __pycache__
 densenet
+florence_attempt/LOCAL_florence_eval_text.py
+florence_attempt/annotations.jsonl
+/florence_attempt/padchest_images
+/florence_attempt/florence_epoch_50
+florence_attempt/caption_eval.jsonl
+florence_attempt/caption_eval_with_defs.jsonl
+/florence_attempt/florence_epoch_50_no_defs
+/florence_attempt/florence_epoch_50_with_defs
+florence_attempt/a.py
+all_conf_matrix_ensemble.png
+all_conf_matrix_maira.png
+florence_attempt/caption_eval_florence_epoch_50_no_defs.jsonl
+all_conf_matrix_ensemble - Copy.png
+ensemble/ensemble_effnetb5_dnet121.49-0.1068.keras
+ensemble/LOCAL_ensemble_eval.py
+ensemble/ensemble_checkpoints/ensemble_effnetb5_dnet121.49-0.1068.keras
+ensemble/annotations.jsonl
+/ensemble/valid

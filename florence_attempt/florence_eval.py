@@ -251,6 +251,31 @@ print(f"precision = {overall_precision:.3f}")
 print(f"recall = {overall_recall:.3f}")
 print(f"f1 = {overall_f1:.3f}")
 
+# classification-style metrics without considering IoU
+y_true_multi, y_pred_multi = [], []
+
+for pred, gt in zip(predictions, targets):
+    gt_ids = set(gt.class_id.tolist())
+    pred_ids = set(pred.class_id.tolist())
+
+    # create binary vector per image for each class
+    y_true_multi.append([1 if i in gt_ids else 0 for i in range(len(CLASSES))])
+    y_pred_multi.append([1 if i in pred_ids else 0 for i in range(len(CLASSES))])
+
+y_true_multi = np.array(y_true_multi)
+y_pred_multi = np.array(y_pred_multi)
+
+# macro averages across classes
+from sklearn.metrics import precision_recall_fscore_support
+
+precision_cls, recall_cls, f1_cls, _ = precision_recall_fscore_support(
+    y_true_multi, y_pred_multi, average="macro", zero_division=0
+)
+
+print("\nClassification-style precision, recall, F1 (ignoring IoU):")
+print(f"precision = {precision_cls:.3f}")
+print(f"recall = {recall_cls:.3f}")
+print(f"f1 = {f1_cls:.3f}")
 
 # create output directory for confusion matrices
 os.makedirs("confusion_matrices_florence", exist_ok=True)
@@ -293,10 +318,16 @@ def get_binary_confusion_matrix_for_class(class_id: int, class_name: str, predic
     plt.savefig(filename, dpi=300)
     plt.close()
 
-    return cm
+    # calculate per-class precision, recall, and F1
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall    = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+    
+    return cm, precision, recall, f1 
 
 # Loop through each class and generate/save its confusion matrix
 print("\nGenerating per-class binary confusion matrices:")
 for class_id, class_name in enumerate(CLASSES):
-    cm = get_binary_confusion_matrix_for_class(class_id, class_name, predictions, targets)
+    cm, precision, recall, f1 = get_binary_confusion_matrix_for_class(class_id, class_name, predictions, targets)
     print(f"{class_name}:\n{cm}")
+    print(f" Precision: {precision:.3f}, Recall: {recall:.3f}, F1: {f1:.3f}\n")

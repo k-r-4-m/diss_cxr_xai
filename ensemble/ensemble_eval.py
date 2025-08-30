@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from keras.models import load_model
 from keras.applications.densenet import preprocess_input as densenet_preprocess
 from keras.applications.efficientnet import preprocess_input as efficientnet_preprocess
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, multilabel_confusion_matrix
+from sklearn.metrics import precision_score, recall_score, f1_score, multilabel_confusion_matrix
 import seaborn as sns
 import re
 import tensorflow as tf
@@ -218,15 +218,13 @@ y_pred_prob = ensemble_model.predict(
 # converts the probabilities to binary predictions using the threshold
 y_pred = (y_pred_prob > THRESHOLD).astype(int)
 
-# calculate accuracy, precision, recall, f1
-accuracy = accuracy_score(y_val, y_pred)
+# calculate precision, recall, f1
 precision = precision_score(y_val, y_pred, average='macro', zero_division=0)
 recall = recall_score(y_val, y_pred, average='macro', zero_division=0)
 f1 = f1_score(y_val, y_pred, average='macro', zero_division=0)
 
 print(f"\nModel eval results: ")
 print(f"Threshold: {THRESHOLD}")
-print(f"Accuracy : {accuracy:.4f}")
 print(f"Precision: {precision:.4f}")
 print(f"Recall   : {recall:.4f}")
 print(f"F1 Score : {f1:.4f}")
@@ -293,3 +291,37 @@ for thresh in thresholds:
 best_threshold_idx = np.argmax([result[1] for result in threshold_results])
 best_threshold = threshold_results[best_threshold_idx][0]
 print(f"\nOptimal threshold for F1: {best_threshold:.1f} (F1={threshold_results[best_threshold_idx][1]:.4f})")
+
+
+# # trying youden's j statistic
+# from sklearn.metrics import confusion_matrix
+
+# print("\nYouden's J analysis (per class):")
+# youden_results = []
+
+# thresholds = np.arange(0.0, 1.0, 0.01)  # finer sweep than 0.1
+# best_thresholds = {}
+
+# for i, label in enumerate(CLASSES):
+#     y_true = y_val[:, i]
+#     best_j, best_t = -1, None
+    
+#     for t in thresholds:
+#         y_pred_t = (y_pred_prob[:, i] > t).astype(int)
+#         tn, fp, fn, tp = confusion_matrix(y_true, y_pred_t, labels=[0,1]).ravel()
+        
+#         sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0
+#         specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+#         j = sensitivity + specificity - 1
+        
+#         if j > best_j:
+#             best_j = j
+#             best_t = t
+    
+#     best_thresholds[label] = best_t
+#     youden_results.append((label, best_t, best_j))
+#     print(f"{label:<20} Best Thresh={best_t:.2f}, J={best_j:.3f}")
+
+# # Example: if you want a single global threshold (mean of all best thresholds)
+# global_optimal_threshold = np.mean(list(best_thresholds.values()))
+# print(f"\nGlobal optimal threshold (mean of per-class best): {global_optimal_threshold:.3f}")

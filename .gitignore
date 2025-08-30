@@ -68,3 +68,5 @@ ensemble/LOCAL_ensemble_eval.py
 ensemble/ensemble_checkpoints/ensemble_effnetb5_dnet121.49-0.1068.keras
 ensemble/annotations.jsonl
 /ensemble/valid
+confusion_matrices_ensemble.png
+confusion_matrices_maira2.png

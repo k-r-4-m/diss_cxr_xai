@@ -6,6 +6,7 @@ from peft import LoraConfig, get_peft_model
 from torch.utils.data import DataLoader, Dataset
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix as sk_confusion_matrix
+from sklearn.metrics import precision_recall_fscore_support
 from torchvision.transforms.functional import to_pil_image
 # from IPython.display import display
 from pydicom.pixel_data_handlers.util import apply_voi_lut
@@ -138,120 +139,142 @@ for i in range(len(val_dataset.dataset)):
     print(f"pred {prediction}")
 
 
-# calculates mAP scores
+### calculates mAP scores
 mean_average_precision = sv.MeanAveragePrecision.from_detections(
     predictions=predictions,
-    targets=targets,
-)
+    targets=targets)
 
-print(f"map50_95: {mean_average_precision.map50_95:.2f}")
 print(f"map50: {mean_average_precision.map50:.2f}")
 print(f"map75: {mean_average_precision.map75:.2f}")
+print(f"map50_95: {mean_average_precision.map50_95:.2f}")
 
-# calculates and outputs the confusion matrix
-conf_matrix = sv.ConfusionMatrix.from_detections(
-    predictions=predictions,
-    targets=targets,
-    classes=CLASSES
-)
+def compute_map_per_class(predictions, targets, class_id, iou_thresholds=[0.5, 0.75]):
+    # Filter predictions and targets for this class
+    class_preds = []
+    class_gts = []
+    for pred, gt in zip(predictions, targets):
+        pred_cls = pred[pred.class_id == class_id]
+        gt_cls   = gt[gt.class_id == class_id]
+        class_preds.append(pred_cls)
+        class_gts.append(gt_cls)
 
-# saves the confusion matrix as an image
-fig = conf_matrix.plot()
-fig.savefig("confusion_matrix.png", dpi=300, bbox_inches='tight')
+    # Use supervision's helper to compute per-class mAP
+    map_metrics = sv.MeanAveragePrecision.from_detections(
+        predictions=class_preds,
+        targets=class_gts,
+    )
+    return map_metrics.map50, map_metrics.map75, map_metrics.map50_95
+
+# Compute for all classes
+print("\nPer-class mAP values:")
+for class_id, class_name in enumerate(CLASSES):
+    map50, map75, map50_95 = compute_map_per_class(predictions, targets, class_id)
+    print(f"{class_name}: mAP@50={map50:.3f}, mAP@75={map75:.3f}, mAP@50-95={map50_95:.3f}")
 
 
-# calculates the per-class IoU values
-def compute_per_class_iou(preds, gts, num_classes):
-    # dictionary to hold IoU values for each class
-    iou_per_class = defaultdict(list)
+# # calculates and outputs the confusion matrix
+# conf_matrix = sv.ConfusionMatrix.from_detections(
+#     predictions=predictions,
+#     targets=targets,
+#     classes=CLASSES
+# )
 
-    # for each prediction and ground truth
-    for pred, gt in zip(preds, gts):
-        # for each class, calcualte the IoU
-        for cls in range(num_classes):
-            pred_cls = pred[pred.class_id == cls]
-            gt_cls = gt[gt.class_id == cls]
+# # saves the confusion matrix as an image
+# fig = conf_matrix.plot()
+# fig.savefig("confusion_matrix.png", dpi=300, bbox_inches='tight')
 
-            # no predicted or ground truth for this class
-            if len(gt_cls) == 0 and len(pred_cls) == 0:
-                continue
+# # calculates the per-class IoU values
+# def compute_per_class_iou(preds, gts, num_classes):
+#     # dictionary to hold IoU values for each class
+#     iou_per_class = defaultdict(list)
 
-            iou_matrix = box_iou_batch(gt_cls.xyxy, pred_cls.xyxy)
+#     # for each prediction and ground truth
+#     for pred, gt in zip(preds, gts):
+#         # for each class, calcualte the IoU
+#         for cls in range(num_classes):
+#             pred_cls = pred[pred.class_id == cls]
+#             gt_cls = gt[gt.class_id == cls]
 
-            if iou_matrix.size == 0:
-                continue  # nothing to match, i.e. no prediction
+#             # no predicted or ground truth for this class
+#             if len(gt_cls) == 0 and len(pred_cls) == 0:
+#                 continue
 
-            matched_pred = set()
-            matched_gt = set()
+#             iou_matrix = box_iou_batch(gt_cls.xyxy, pred_cls.xyxy)
 
-            for gt_idx, ious in enumerate(iou_matrix):
-                if ious.size == 0:
-                    continue
+#             if iou_matrix.size == 0:
+#                 continue  # nothing to match, i.e. no prediction
 
-                best_pred_idx = np.argmax(ious)
-                iou = ious[best_pred_idx]
-                if iou >= 0.5 and best_pred_idx not in matched_pred:
-                    iou_per_class[cls].append(iou)
-                    matched_pred.add(best_pred_idx)
-                    matched_gt.add(gt_idx)
+#             matched_pred = set()
+#             matched_gt = set()
 
-    # returns the average IoU per class
-    avg_iou_per_class = {CLASSES[cls]: np.mean(iou_list) if iou_list else 0.0 for cls, iou_list in iou_per_class.items()}
+#             for gt_idx, ious in enumerate(iou_matrix):
+#                 if ious.size == 0:
+#                     continue
 
-    # ensure all classes are included, even if empty
-    for cls in range(num_classes):
-        class_name = CLASSES[cls]
-        if class_name not in avg_iou_per_class:
-            avg_iou_per_class[class_name] = 0.0
+#                 best_pred_idx = np.argmax(ious)
+#                 iou = ious[best_pred_idx]
+#                 if iou >= 0.5 and best_pred_idx not in matched_pred:
+#                     iou_per_class[cls].append(iou)
+#                     matched_pred.add(best_pred_idx)
+#                     matched_gt.add(gt_idx)
 
-    return avg_iou_per_class
+#     # returns the average IoU per class
+#     avg_iou_per_class = {CLASSES[cls]: np.mean(iou_list) if iou_list else 0.0 for cls, iou_list in iou_per_class.items()}
 
-# calculates precision and recall
-conf_mat = conf_matrix.matrix  # gets the actual matrix from the confusion matrix
-precision_per_class = {}
-recall_per_class = {}
-f1_per_class = {}
-epsilon = 1e-8  # used to add small constant for f1 score, prevents divison by zero
+#     # ensure all classes are included, even if empty
+#     for cls in range(num_classes):
+#         class_name = CLASSES[cls]
+#         if class_name not in avg_iou_per_class:
+#             avg_iou_per_class[class_name] = 0.0
 
-# for each class, calculate precision and recall
-for i, class_name in enumerate(CLASSES):
-    TP = conf_mat[i, i]  # true positives
-    FP = conf_mat[:, i].sum() - TP  # false positives
-    FN = conf_mat[i, :].sum() - TP  # false negatives
+#     return avg_iou_per_class
 
-    precision = TP / (TP + FP) if TP + FP > 0 else 0.0
-    recall = TP / (TP + FN) if TP + FN > 0 else 0.0
-    precision_per_class[class_name] = precision
-    recall_per_class[class_name] = recall
+# # calculates precision and recall
+# conf_mat = conf_matrix.matrix  # gets the actual matrix from the confusion matrix
+# precision_per_class = {}
+# recall_per_class = {}
+# f1_per_class = {}
+# epsilon = 1e-8  # used to add small constant for f1 score, prevents divison by zero
 
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
-    f1_per_class[class_name] = f1
+# # for each class, calculate precision and recall
+# for i, class_name in enumerate(CLASSES):
+#     TP = conf_mat[i, i]  # true positives
+#     FP = conf_mat[:, i].sum() - TP  # false positives
+#     FN = conf_mat[i, :].sum() - TP  # false negatives
 
-total_TP = np.trace(conf_mat)  # total true positives
-total_FP = conf_mat.sum(axis=0).sum() - total_TP  # total false positives
-total_FN = conf_mat.sum(axis=1).sum() - total_TP  # total false negatives
+#     precision = TP / (TP + FP) if TP + FP > 0 else 0.0
+#     recall = TP / (TP + FN) if TP + FN > 0 else 0.0
+#     precision_per_class[class_name] = precision
+#     recall_per_class[class_name] = recall
 
-overall_precision = np.mean(list(precision_per_class.values()))
-overall_recall = np.mean(list(recall_per_class.values()))
-overall_f1 = np.mean(list(f1_per_class.values()))
+#     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+#     f1_per_class[class_name] = f1
 
-print("\n per class IoU:")
-iou_scores = compute_per_class_iou(predictions, targets, num_classes=len(CLASSES))
-for cls, iou in iou_scores.items():
-    print(f"{cls}: IoU = {iou:.3f}")
+# total_TP = np.trace(conf_mat)  # total true positives
+# total_FP = conf_mat.sum(axis=0).sum() - total_TP  # total false positives
+# total_FN = conf_mat.sum(axis=1).sum() - total_TP  # total false negatives
 
-print("\n per class precision, recall, and f1")
-for cls in CLASSES:
-    print(f"{cls}: precision = {precision_per_class[cls]:.3f}, "
-          f"recall = {recall_per_class[cls]:.3f}, "
-          f"f1 = {f1_per_class[cls]:.3f}")
+# overall_precision = np.mean(list(precision_per_class.values()))
+# overall_recall = np.mean(list(recall_per_class.values()))
+# overall_f1 = np.mean(list(f1_per_class.values()))
 
-print("\n overall precision, recall, and f1")
-print(f"precision = {overall_precision:.3f}")
-print(f"recall = {overall_recall:.3f}")
-print(f"f1 = {overall_f1:.3f}")
+# print("\n per class IoU:")
+# iou_scores = compute_per_class_iou(predictions, targets, num_classes=len(CLASSES))
+# for cls, iou in iou_scores.items():
+#     print(f"{cls}: IoU = {iou:.3f}")
 
-# classification-style metrics without considering IoU
+# print("\n per class precision, recall, and f1")
+# for cls in CLASSES:
+#     print(f"{cls}: precision = {precision_per_class[cls]:.3f}, "
+#           f"recall = {recall_per_class[cls]:.3f}, "
+#           f"f1 = {f1_per_class[cls]:.3f}")
+
+# print("\n overall precision, recall, and f1")
+# print(f"precision = {overall_precision:.3f}")
+# print(f"recall = {overall_recall:.3f}")
+# print(f"f1 = {overall_f1:.3f}")
+
+### classification-style metrics without considering IoU
 y_true_multi, y_pred_multi = [], []
 
 for pred, gt in zip(predictions, targets):
@@ -266,8 +289,6 @@ y_true_multi = np.array(y_true_multi)
 y_pred_multi = np.array(y_pred_multi)
 
 # macro averages across classes
-from sklearn.metrics import precision_recall_fscore_support
-
 precision_cls, recall_cls, f1_cls, _ = precision_recall_fscore_support(
     y_true_multi, y_pred_multi, average="macro", zero_division=0
 )

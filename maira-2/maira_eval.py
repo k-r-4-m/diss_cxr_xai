@@ -4,7 +4,6 @@
     Evaluates the following:
         Classification performance (precision, recall, F1)
         Localisation performance (mean average precision)
-        Text generation performance (BLEU, ROUGE-L)
 
     REQUIRES TRANSFORMERS==4.51.3 !!!
 """
@@ -505,7 +504,7 @@ def create_side_by_side_visualization(image, gt_detections, pred_detections, cla
     return save_path 
 
 
-### builds model
+### loads model
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 CHECKPOINT = "microsoft/maira-2"
 model = AutoModelForCausalLM.from_pretrained(CHECKPOINT, trust_remote_code=True)
@@ -557,7 +556,7 @@ with open(ANNOTATIONS_JSON, "r") as f:
         with torch.no_grad():
             out_ids = model.generate(
                 **inputs,
-                max_new_tokens=1024,  # 450 recommended for report generation from maira docs
+                max_new_tokens=1024,
                 use_cache=True,
                 early_stopping=True,
                 num_beams=3,

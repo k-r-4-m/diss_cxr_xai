@@ -1,5 +1,3 @@
-import os
-import torch
 # need transformers version>=4.53.1
 from transformers import get_scheduler, AutoModelForCausalLM, AutoProcessor, AutoConfig  
 from peft import LoraConfig, get_peft_model
@@ -8,13 +6,11 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix as sk_confusion_matrix
 from sklearn.metrics import precision_recall_fscore_support
 from torchvision.transforms.functional import to_pil_image
-# from IPython.display import display
 from pydicom.pixel_data_handlers.util import apply_voi_lut
 from difflib import get_close_matches
 from typing import List, Dict, Any, Tuple, Generator
 from PIL import Image
 from tqdm import tqdm
-# from IPython.core.display import HTML
 from datetime import datetime
 from pathvalidate import sanitize_filename
 from collections import defaultdict
@@ -22,6 +18,8 @@ from supervision.detection.utils import box_iou_batch
 from florence_tools import *
 import io
 import matplotlib.pyplot as plt
+import os
+import torch
 import seaborn as sns
 import pandas as pd
 import numpy as np
@@ -66,7 +64,7 @@ val_dataset = DetectionDataset(
 val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, collate_fn=collate_fn, num_workers=NUM_WORKERS)
 
 
-## Fine-tuned model evaluation
+### loads model
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 CHECKPOINT = f"./model_checkpoints/epoch_{EPOCHS}"  # gets the last checkpoint of the model training
 
@@ -83,7 +81,7 @@ CLASSES.remove("No finding")  # removes no finding from the classes list
 targets = []
 predictions = []
 
-# evaluates model on the validation split
+### eval loop
 for i in range(len(val_dataset.dataset)):
     image, data = val_dataset.dataset[i]
     prefix = data['prefix']  # prefix is the task
@@ -136,7 +134,7 @@ for i in range(len(val_dataset.dataset)):
     predictions.append(prediction)
 
     print(f"Target {target}")
-    print(f"pred {prediction}")
+    print(f"Pred {prediction}")
 
 
 ### calculates mAP scores
@@ -154,7 +152,7 @@ def compute_map_per_class(predictions, targets, class_id, iou_thresholds=[0.5, 0
     class_gts = []
     for pred, gt in zip(predictions, targets):
         pred_cls = pred[pred.class_id == class_id]
-        gt_cls   = gt[gt.class_id == class_id]
+        gt_cls = gt[gt.class_id == class_id]
         class_preds.append(pred_cls)
         class_gts.append(gt_cls)
 

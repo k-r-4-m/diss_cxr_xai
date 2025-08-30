@@ -14,7 +14,6 @@ import re
 
 print("RUNNING: FLORENCE CAPTIONING EVALUATION")
 
-# === CONFIG ===
 config_path = "./config.yaml"
 config = load_config(config_path)
 
@@ -27,7 +26,7 @@ OUTPUT_DIR = "./padchest/"
 
 print("config loaded")
 
-## loads model
+### loads model
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 CHECKPOINT = f"./model_checkpoints/epoch_{EPOCHS}"
 
@@ -43,8 +42,8 @@ val_dataset = DetectionDataset(
     image_directory_path=f"{OUTPUT_DIR}/images/"
 )
 
-# saves output to jsonl file
-results_jsonl = os.path.join(OUTPUT_DIR, "caption_eval.jsonl")
+# save the output to jsonl file
+results_jsonl = os.path.join(OUTPUT_DIR, "florence_caption_eval.jsonl")
 results_file = open(results_jsonl, "w")
 
 # smoothing function for BLEU
@@ -111,8 +110,6 @@ for i in tqdm(range(len(val_dataset.dataset))):
 results_file.close()
 
 ### metrics
-smooth_fn = SmoothingFunction().method1
-
 bleu1_scores = [
     sentence_bleu([ref.split()], pred.split(), weights=(1), smoothing_function=smooth_fn)
     for ref, pred in zip(targets, predictions)

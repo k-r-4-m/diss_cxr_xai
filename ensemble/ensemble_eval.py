@@ -215,8 +215,36 @@ y_pred_prob = ensemble_model.predict(
     verbose=1
 )
 
-# converts the probabilities to binary predictions using the threshold
-y_pred = (y_pred_prob > THRESHOLD).astype(int)
+# youden's J analysis suggests these thresholds per-class
+# these values were arrived at after running the code once
+class_thresholds =  {
+    'Cardiomegaly': 0.64,
+    'Aortic enlargement': 0.10,
+    'Pleural thickening': 0.31,
+    'ILD': 0.96,
+    'Nodule/Mass': 0.11,
+    'Pulmonary fibrosis': 0.10,
+    'Lung Opacity': 0.20,
+    'Atelectasis': 0.43,
+    'Other lesion': 0.31,
+    'Infiltration': 0.27,
+    'Pleural effusion': 0.30,
+    'Calcification': 0.30,
+    'Consolidation': 0.06,
+    'Pneumothorax': 0.47
+}
+
+# # converts the probabilities to binary predictions using the threshold
+# y_pred = (y_pred_prob > THRESHOLD).astype(int)
+
+# initialise empty predictions
+y_pred = np.zeros_like(y_pred_prob, dtype=int)
+
+# apply per-class thresholds
+for label, t in class_thresholds.items():
+    idx = label_2_idx[label]
+    y_pred[:, idx] = (y_pred_prob[:, idx] > t).astype(int)
+
 
 # calculate precision, recall, f1
 precision = precision_score(y_val, y_pred, average='macro', zero_division=0)

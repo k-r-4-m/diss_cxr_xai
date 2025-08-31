@@ -63,7 +63,7 @@ root
 ```
 
 ## Data Preprocessing
-Before training any of the models, the dataset needs to be preprocessed and augmented, which can be done so by running the florence_preprocessing_aug.py which preprocesses VinDr-CXR into Florence format which all other models also use. padchest_preprocessing.py must also be run to preprocess PadChest-GR for textual radiology report evaluation.
+Before training any of the models, the dataset needs to be preprocessed and augmented, which can be done so by running the vindr_preprocessing_aug.py which preprocesses VinDr-CXR into Florence format which all other models also use. padchest_preprocessing.py must also be run to preprocess PadChest-GR for textual radiology report evaluation.
 
 ## Training the Models
 Running the code to train Florence-2 and the ensemble model can be done so by running florence_train.py and ensemble_train.py files respectively.

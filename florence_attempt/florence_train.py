@@ -10,7 +10,7 @@
 
 import os
 import torch
-# need transformers version 4.53.1
+# need transformers version 4.53.2
 from transformers import get_scheduler, AutoModelForCausalLM, AutoProcessor, AutoConfig  
 from peft import LoraConfig, get_peft_model
 from torch.utils.data import DataLoader, Dataset

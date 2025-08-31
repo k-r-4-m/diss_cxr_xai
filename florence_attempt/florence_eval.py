@@ -1,3 +1,15 @@
+"""
+    Evaluates the classification and localisation performance of Florence-2 on the VinDr-CXR dataset
+
+    Evaluates the following:
+        Classification performance (precision, recall, F1)
+        Localisation performance (mean average precision)
+
+    Requires:
+        Florence to have been pretrained with a model checkpoint stored in model_checkpoints/epoch_n
+        VinDr-CXR to have been downloaded and preprocessed
+"""
+
 # need transformers version>=4.53.1
 from transformers import get_scheduler, AutoModelForCausalLM, AutoProcessor, AutoConfig  
 from peft import LoraConfig, get_peft_model
@@ -147,7 +159,7 @@ print(f"map75: {mean_average_precision.map75:.2f}")
 print(f"map50_95: {mean_average_precision.map50_95:.2f}")
 
 def compute_map_per_class(predictions, targets, class_id, iou_thresholds=[0.5, 0.75]):
-    # Filter predictions and targets for this class
+    # filter preds and targets for this class
     class_preds = []
     class_gts = []
     for pred, gt in zip(predictions, targets):
@@ -156,121 +168,19 @@ def compute_map_per_class(predictions, targets, class_id, iou_thresholds=[0.5, 0
         class_preds.append(pred_cls)
         class_gts.append(gt_cls)
 
-    # Use supervision's helper to compute per-class mAP
+    # compute per-class mAP
     map_metrics = sv.MeanAveragePrecision.from_detections(
         predictions=class_preds,
         targets=class_gts,
     )
     return map_metrics.map50, map_metrics.map75, map_metrics.map50_95
 
-# Compute for all classes
+# compute for all classes
 print("\nPer-class mAP values:")
 for class_id, class_name in enumerate(CLASSES):
     map50, map75, map50_95 = compute_map_per_class(predictions, targets, class_id)
     print(f"{class_name}: mAP@50={map50:.3f}, mAP@75={map75:.3f}, mAP@50-95={map50_95:.3f}")
 
-
-# # calculates and outputs the confusion matrix
-# conf_matrix = sv.ConfusionMatrix.from_detections(
-#     predictions=predictions,
-#     targets=targets,
-#     classes=CLASSES
-# )
-
-# # saves the confusion matrix as an image
-# fig = conf_matrix.plot()
-# fig.savefig("confusion_matrix.png", dpi=300, bbox_inches='tight')
-
-# # calculates the per-class IoU values
-# def compute_per_class_iou(preds, gts, num_classes):
-#     # dictionary to hold IoU values for each class
-#     iou_per_class = defaultdict(list)
-
-#     # for each prediction and ground truth
-#     for pred, gt in zip(preds, gts):
-#         # for each class, calcualte the IoU
-#         for cls in range(num_classes):
-#             pred_cls = pred[pred.class_id == cls]
-#             gt_cls = gt[gt.class_id == cls]
-
-#             # no predicted or ground truth for this class
-#             if len(gt_cls) == 0 and len(pred_cls) == 0:
-#                 continue
-
-#             iou_matrix = box_iou_batch(gt_cls.xyxy, pred_cls.xyxy)
-
-#             if iou_matrix.size == 0:
-#                 continue  # nothing to match, i.e. no prediction
-
-#             matched_pred = set()
-#             matched_gt = set()
-
-#             for gt_idx, ious in enumerate(iou_matrix):
-#                 if ious.size == 0:
-#                     continue
-
-#                 best_pred_idx = np.argmax(ious)
-#                 iou = ious[best_pred_idx]
-#                 if iou >= 0.5 and best_pred_idx not in matched_pred:
-#                     iou_per_class[cls].append(iou)
-#                     matched_pred.add(best_pred_idx)
-#                     matched_gt.add(gt_idx)
-
-#     # returns the average IoU per class
-#     avg_iou_per_class = {CLASSES[cls]: np.mean(iou_list) if iou_list else 0.0 for cls, iou_list in iou_per_class.items()}
-
-#     # ensure all classes are included, even if empty
-#     for cls in range(num_classes):
-#         class_name = CLASSES[cls]
-#         if class_name not in avg_iou_per_class:
-#             avg_iou_per_class[class_name] = 0.0
-
-#     return avg_iou_per_class
-
-# # calculates precision and recall
-# conf_mat = conf_matrix.matrix  # gets the actual matrix from the confusion matrix
-# precision_per_class = {}
-# recall_per_class = {}
-# f1_per_class = {}
-# epsilon = 1e-8  # used to add small constant for f1 score, prevents divison by zero
-
-# # for each class, calculate precision and recall
-# for i, class_name in enumerate(CLASSES):
-#     TP = conf_mat[i, i]  # true positives
-#     FP = conf_mat[:, i].sum() - TP  # false positives
-#     FN = conf_mat[i, :].sum() - TP  # false negatives
-
-#     precision = TP / (TP + FP) if TP + FP > 0 else 0.0
-#     recall = TP / (TP + FN) if TP + FN > 0 else 0.0
-#     precision_per_class[class_name] = precision
-#     recall_per_class[class_name] = recall
-
-#     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
-#     f1_per_class[class_name] = f1
-
-# total_TP = np.trace(conf_mat)  # total true positives
-# total_FP = conf_mat.sum(axis=0).sum() - total_TP  # total false positives
-# total_FN = conf_mat.sum(axis=1).sum() - total_TP  # total false negatives
-
-# overall_precision = np.mean(list(precision_per_class.values()))
-# overall_recall = np.mean(list(recall_per_class.values()))
-# overall_f1 = np.mean(list(f1_per_class.values()))
-
-# print("\n per class IoU:")
-# iou_scores = compute_per_class_iou(predictions, targets, num_classes=len(CLASSES))
-# for cls, iou in iou_scores.items():
-#     print(f"{cls}: IoU = {iou:.3f}")
-
-# print("\n per class precision, recall, and f1")
-# for cls in CLASSES:
-#     print(f"{cls}: precision = {precision_per_class[cls]:.3f}, "
-#           f"recall = {recall_per_class[cls]:.3f}, "
-#           f"f1 = {f1_per_class[cls]:.3f}")
-
-# print("\n overall precision, recall, and f1")
-# print(f"precision = {overall_precision:.3f}")
-# print(f"recall = {overall_recall:.3f}")
-# print(f"f1 = {overall_f1:.3f}")
 
 ### classification-style metrics without considering IoU
 y_true_multi, y_pred_multi = [], []
@@ -296,7 +206,7 @@ print(f"precision = {precision_cls:.3f}")
 print(f"recall = {recall_cls:.3f}")
 print(f"f1 = {f1_cls:.3f}")
 
-# create output directory for confusion matrices
+# creates output directory for confusion matrices
 os.makedirs("confusion_matrices_florence", exist_ok=True)
 
 def get_binary_confusion_matrix_for_class(class_id: int, class_name: str, predictions, targets):
@@ -310,14 +220,14 @@ def get_binary_confusion_matrix_for_class(class_id: int, class_name: str, predic
         y_true.append(int(class_id in gt_ids))
         y_pred.append(int(class_id in pred_ids))
 
-    # Compute 2x2 confusion matrix: [[TN, FP], [FN, TP]]
+    # computes 2x2 conf matrix
+    # [[TN, FP], [FN, TP]]
     cm = sk_confusion_matrix(y_true, y_pred, labels=[0, 1])
     tn, fp, fn, tp = cm.ravel()
 
     reordered_cm = np.array([[tp, fn],
                             [fp, tn]])
 
-    # Plot
     plt.figure(figsize=(4, 3))
     sns.heatmap(
         reordered_cm,
@@ -332,19 +242,18 @@ def get_binary_confusion_matrix_for_class(class_id: int, class_name: str, predic
     plt.ylabel("True")
     plt.tight_layout()
 
-    # Save to folder
     filename = f"confusion_matrices_florence/conf_matrix_{sanitize_filename(class_name)}.png"
     plt.savefig(filename, dpi=300)
     plt.close()
 
-    # calculate per-class precision, recall, and F1
+    # calculates per-class precision, recall, and F1
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
     recall    = tp / (tp + fn) if (tp + fn) > 0 else 0.0
     f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
     
     return cm, precision, recall, f1 
 
-# Loop through each class and generate/save its confusion matrix
+# loops through each class and generate/save its confusion matrix
 print("\nGenerating per-class binary confusion matrices:")
 for class_id, class_name in enumerate(CLASSES):
     cm, precision, recall, f1 = get_binary_confusion_matrix_for_class(class_id, class_name, predictions, targets)

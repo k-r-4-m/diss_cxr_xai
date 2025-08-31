@@ -1,12 +1,11 @@
 """
-    Helper file for some shared functions between the files for Florence-2
+    Helper file for some shared functions between the files for MAIRA-2
 """
 
 import os
 import torch
-# need transformers version 4.53.1
+# need transformers==4.51.3 
 from transformers import get_scheduler, AutoModelForCausalLM, AutoProcessor, AutoConfig  
-from peft import LoraConfig, get_peft_model
 from torch.utils.data import DataLoader, Dataset
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix

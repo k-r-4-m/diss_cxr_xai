@@ -20,12 +20,14 @@ from sklearn.metrics import confusion_matrix as sk_confusion_matrix
 from sklearn.metrics import precision_recall_fscore_support
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import matplotlib.colors as mcolors
+from matplotlib.lines import Line2D
 import seaborn as sns
 from pathvalidate import sanitize_filename
 import sys
 import colorsys
 
-print("RUNNING FLORENCE VISUALISATIONS")
+print("RUNNING MAIRA VISUALISATIONS")
 
 # loads the config.yaml file for model configuration
 def load_config(config_path):
@@ -62,6 +64,24 @@ df = pd.read_csv(ANNOTATIONS_CSV)
 CLASSES = df['class_name'].unique().tolist()
 CLASSES.remove("No finding")  # removes no finding from the classes list
 
+CLASS_COLOURS = {
+    "aortic enlargement": "#ff0000",
+    "atelectasis": "#1e77b4",
+    "calcification": "#ff7f0e",
+    "cardiomegaly": "#008000",
+    "consolidation": "#9366bd",
+    "ild": "#8c564b",
+    "infiltration": "#efb3dd",
+    "lung opacity": "#a52a2a",
+    "nodule/mass": "#aec7e8",
+    "other lesion": "#979696",
+    "pleural effusion": "#808000",
+    "pleural thickening": "#06fafa",
+    "pneumothorax": "#ffba78",
+    "pulmonary fibrosis": "#c5b0d4"
+}
+
+
 # a dictionary to map synonyms for classes
 # this is because MAIRA-2 will refer to classes by different names/terms
 # not all classes will have synonyms
@@ -75,7 +95,7 @@ CLASS_SYNONYMS = {
     "infiltration": ["infiltrates", "infiltrate"],
     "lung opacity": ["increased density in the right", "increased density in the left"],
     "nodule/mass": ["mass", "nodule", "calcified granuloma", "nodular density", "granulomas"],
-    "other lesion": ["subcutaneous emphysema", ],
+    "other lesion": ["subcutaneous emphysema"],
     "pleural effusion": ["pleural fluid", "effusion", "effusions", "fluid in pleural space"],
     "pleural thickening": ["thickening"],
     "pneumothorax": ["collapsed lung", "air in pleural space"],
@@ -293,65 +313,59 @@ def _to_pixel_box(b, W, H):
 # converts the MAIRA-2 output into a Detections object
 # MAIRA-2 output is quite different than Florence-2, explicit class names aren't given
 # need to extract any class names mentioned in each part of the report
-def parse_maira_prediction_to_detections(maira_output, img_size: Tuple[int, int],) -> sv.Detections:
-    
-    if not maira_output:
+def parse_maira_prediction_to_detections(decoded_text: str, img_size: Tuple[int, int]) -> sv.Detections:
+    """
+    Parse raw decoded MAIRA output into strictly localised detections.
+    - Each <obj> block is handled independently
+    - Negated findings are skipped
+    - If no <box> present, the finding goes into `unlocalised` only
+    """
+    if not decoded_text or not decoded_text.strip():
         return sv.Detections.empty()
 
     W, H = img_size
     xyxy, class_ids, confs = [], [], []
+    unlocalised = []
 
-    items = _coerce_maira_items(maira_output)
-    # print(f"MAIRA coerced items: {items}")
+    for obj in re.findall(r"<obj>(.*?)</obj>", decoded_text, flags=re.DOTALL | re.IGNORECASE):
+        text_block = obj.strip()
 
-    for (finding_text, bboxes) in items:
-        if not isinstance(finding_text, str) or not finding_text.strip():
+        # skip negated findings
+        if is_negated(text_block):
             continue
 
-        # skip findings that are "negated"
-        # i.e. maira says this finding is NOT present
-        if is_negated(finding_text):
-            # print(f"Skipping negated: {finding_text}")
-            continue
-
-        # maps the finding to a class
-        mapped = normalise_finding(finding_text)
+        mapped = normalise_finding(text_block)
         if mapped is None:
-            # try within <obj>...</obj> chunks (if present)
-            for sub in extract_findings_from_maira_text(finding_text):
-                if not is_negated(sub):
-                    mapped_sub = normalise_finding(sub)
-                    if mapped_sub is not None:
-                        cid = CLASSES.index(mapped_sub)
-                        xyxy.append([1.0, 1.0, 2.0, 2.0])  # retain mention, place small box in top left
-                        class_ids.append(cid)
-                        confs.append(1.0)
             continue
 
-        # converts class to class id
         cid = CLASSES.index(mapped)
 
-        # handles bounding boxes
-        if bboxes and len(bboxes) > 0:
-            for b in bboxes:
-                if isinstance(b, (list, tuple)) and len(b) == 4:
-                    xyxy.append(_to_pixel_box(b, W, H))
-                    class_ids.append(cid)
-                    confs.append(1.0)
-        else:
-            # keep ungrounded class mentions as 1x1 box in top left
-            xyxy.append([1.0, 1.0, 2.0, 2.0])
+        # look for <box> inside this <obj>
+        box_match = re.search(r"<box><x(\d+)><y(\d+)><x(\d+)><y(\d+)>", text_block)
+        if box_match:
+            x1, y1, x2, y2 = map(int, box_match.groups())
+            x1, x2 = (x1/1000.0)*W, (x2/1000.0)*W
+            y1, y2 = (y1/1000.0)*H, (y2/1000.0)*H
+            xyxy.append([x1, y1, x2, y2])
             class_ids.append(cid)
             confs.append(1.0)
+        else:
+            # record unlocalised finding
+            unlocalised.append(mapped)
 
     if not xyxy:
-        return sv.Detections.empty()
+        dets = sv.Detections.empty()
+    else:
+        dets = sv.Detections(
+            xyxy=np.array(xyxy, dtype=float),
+            class_id=np.array(class_ids, dtype=int),
+            confidence=np.array(confs, dtype=float),
+        )
+        dets.data['class_name'] = [CLASSES[cid] for cid in dets.class_id]
 
-    return sv.Detections(
-        xyxy=np.array(xyxy, dtype=float),
-        class_id=np.array(class_ids, dtype=int),
-        confidence=np.array(confs, dtype=float),
-    )
+    # always attach unlocalised predictions as metadata
+    dets.data['unlocalised'] = unlocalised
+    return dets
 
 try:
     input_image = sys.argv[1]
@@ -427,7 +441,9 @@ else:
     maira_output = processor.convert_output_to_plaintext_or_grounded_sequence(decoded)
     # expected: list of (finding_text, [(x1,y1,x2,y2)] or None)
 
-    prediction = parse_maira_prediction_to_detections(maira_output, (W, H))
+    print(f"maira out: {maira_output}")
+
+    prediction = parse_maira_prediction_to_detections(decoded, (W, H))
     prediction.data['class_name'] = [CLASSES[cid] for cid in prediction.class_id]
 
     image_np = np.array(image)
@@ -435,14 +451,11 @@ else:
 
 # -------- colour helpers --------
 def class_base_colour(name: str) -> tuple:
-    """
-    Deterministic base colour per class name (RGB in 0-1).
-    Uses HSV with class-hash-based hue so it's stable across runs.
-    """
-    h = (hash(name) % 360) / 360.0
-    s, v = 0.65, 0.95
-    r, g, b = colorsys.hsv_to_rgb(h, s, v)
-    return (r, g, b)
+    """Return consistent base colour (RGB tuple in 0-1) for a class."""
+    if name in CLASS_COLOURS:
+        return CLASS_COLOURS[name][:3]  # drop alpha
+    # fallback if unseen class
+    return (0.5, 0.5, 0.5)
 
 def blend(c, target, t: float):
     """Linear blend between colours c and target with weight t in [0,1]."""
@@ -454,36 +467,43 @@ def gt_shade(base):       # lighter shade (towards white)
 def pred_shade(base):     # darker shade (towards black)
     return blend(base, (0, 0, 0), 0.35)
 
-# -------- drawing --------
-def draw_overlay(image_pil, target_dets, pred_dets):
+def adjust_lightness(hex_colour, factor=1.2):
+    """Brighten or darken a hex colour."""
+    rgb = mcolors.to_rgb(hex_colour)
+    h, l, s = mcolors.rgb_to_hls(*rgb)
+    new_rgb = mcolors.hls_to_rgb(h, max(0, min(1, l*factor)), s)
+    return mcolors.to_hex(new_rgb)
+
+def draw_overlay(image_pil, target_dets, pred_dets, save_path="maira_output_visualised.png"):
     img = np.asarray(image_pil)
     fig, ax = plt.subplots(figsize=(10, 10))
     ax.imshow(img)
 
-    # Ground truth (lighter, solid)
-    for xyxy, cname in zip(target_dets.xyxy, target_dets.data['class_name']):
-        base = class_base_colour(cname)
-        col = gt_shade(base)
-        x1, y1, x2, y2 = xyxy
-        rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1,
-                                 linewidth=2.5, edgecolor=col, facecolor='none', linestyle='-')
-        ax.add_patch(rect)
-        ax.text(x1, max(y1 - 4, 0), f"{cname} (GT)", fontsize=10, color=col,
-                bbox=dict(boxstyle="round,pad=0.2", fc='white', ec='none', alpha=0.7))
+    # --- Ground truth (solid, slightly lighter) ---
+    if target_dets is not None and len(target_dets) > 0:
+        for xyxy, cname in zip(target_dets.xyxy, target_dets.data['class_name']):
+            base = CLASS_COLOURS.get(cname, "#aaaaaa")
+            col = adjust_lightness(base, 1.0)  # keep normal/light
+            x1, y1, x2, y2 = xyxy
+            rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1,
+                                     linewidth=2.5, edgecolor=col, facecolor='none', linestyle='-')
+            ax.add_patch(rect)
+            ax.text(x1, max(y1 - 4, 0), f"{cname} (GT)", fontsize=10, color=col,
+                    bbox=dict(boxstyle="round,pad=0.2", fc='white', ec='none', alpha=0.7))
 
-    # Prediction (darker, dashed)
-    for xyxy, cname in zip(pred_dets.xyxy, pred_dets.data['class_name']):
-        base = class_base_colour(cname)
-        col = pred_shade(base)
-        x1, y1, x2, y2 = xyxy
-        rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1,
-                                 linewidth=2, edgecolor=col, facecolor='none', linestyle='--')
-        ax.add_patch(rect)
-        ax.text(x1, max(y1 - 4, 0), f"{cname} (Pred)", fontsize=9, color=col,
-                bbox=dict(boxstyle="round,pad=0.2", fc='black', ec='none', alpha=0.35))
+    # --- Prediction (dashed, darker) ---
+    if pred_dets is not None and len(pred_dets) > 0:
+        for xyxy, cname in zip(pred_dets.xyxy, pred_dets.data['class_name']):
+            base = CLASS_COLOURS.get(cname, "#aaaaaa")
+            col = adjust_lightness(base, 0.7)  # darker for prediction
+            x1, y1, x2, y2 = xyxy
+            rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1,
+                                     linewidth=2, edgecolor=col, facecolor='none', linestyle='--')
+            ax.add_patch(rect)
+            ax.text(x1, max(y1 - 4, 0), f"{cname} (Pred)", fontsize=9, color=col,
+                    bbox=dict(boxstyle="round,pad=0.2", fc='black', ec='none', alpha=0.35))
 
-    # Legend explaining styles (colour varies by class)
-    from matplotlib.lines import Line2D
+    # --- Legend ---
     legend_elems = [
         Line2D([0], [0], color='black', lw=2.5, linestyle='-', label='Ground truth'),
         Line2D([0], [0], color='black', lw=2.0, linestyle='--', label='Prediction'),
@@ -491,9 +511,15 @@ def draw_overlay(image_pil, target_dets, pred_dets):
     ax.legend(handles=legend_elems, loc='lower right')
     ax.axis('off')
 
-    plt.savefig("maira_output_visualised.png", dpi=200, bbox_inches="tight")
-    plt.close()
+    # --- Unlocalised predictions ---
+    if pred_dets is not None and 'unlocalised' in pred_dets.data and pred_dets.data['unlocalised']:
+        unloc_text = "Predicted (no localisation): " + ", ".join(set(pred_dets.data['unlocalised']))
+        ax.text(0.5, -0.05, unloc_text, fontsize=11, ha='center', va='top',
+                transform=ax.transAxes, color='red')
 
+    # --- Save image ---
+    plt.savefig(save_path, dpi=200, bbox_inches="tight")
+    plt.close()
 
 # call it
 draw_overlay(image, target, prediction)

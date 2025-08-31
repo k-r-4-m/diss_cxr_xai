@@ -27,11 +27,13 @@ class XRayBBoxVisualizer:
         self.dicom_dir = dicom_dir
         self.original_image_sizes = {}
 
+    # parses florence output using regex to remove the <loc_xxxx> tags
     def parse_florence_output(self, suffix_text):
         pattern = r'([^<]+)<loc_(\d+)><loc_(\d+)><loc_(\d+)><loc_(\d+)>'
-        matches = re.findall(pattern, suffix_text)
-        return [{'label': m[0].strip(), 'bbox': list(map(int, m[1:]))} for m in matches]
+        matches = re.findall(pattern, suffix_text)  # remove the loc tags
+        return [{'label': m[0].strip(), 'bbox': list(map(int, m[1:]))} for m in matches]  # remove extra spaces too
 
+    # loads predictions fron the jsonl file
     def load_predictions(self):
         predictions = {}
         with open(self.jsonl_path, 'r') as f:
@@ -40,9 +42,11 @@ class XRayBBoxVisualizer:
                 predictions[data['image']] = self.parse_florence_output(data['suffix'])
         return predictions
 
+    # loads the ground truth from the annotations csv
     def load_ground_truth_from_csv(self):
         df = pd.read_csv(self.ground_truth_csv_path)
         ground_truth = {}
+        # annotations are spread out across multiple rows for single images
         for image_id, group in df.groupby('image_id'):
             detections = []
             for _, row in group.iterrows():
@@ -56,7 +60,8 @@ class XRayBBoxVisualizer:
             ground_truth[image_name] = detections
         return ground_truth
 
-    def normalize_florence_coordinates(self, bbox, img_width, img_height):
+    # takes the normalised florence coordinates and transformers them into the actual pixel locations
+    def normalise_florence_coordinates(self, bbox, img_width, img_height):
         x1, y1, x2, y2 = bbox
         return [
             (x1 / 1000.0) * img_width,
@@ -65,21 +70,25 @@ class XRayBBoxVisualizer:
             (y2 / 1000.0) * img_height
         ]
 
+    # scales the ground truth coordinates
+    # images have been resized from the original ground truth
     def scale_ground_truth_coordinates(self, bbox, original_width, original_height, current_width, current_height):
         x1, y1, x2, y2 = bbox
         scale_x = current_width / original_width
         scale_y = current_height / original_height
         return [x1 * scale_x, y1 * scale_y, x2 * scale_x, y2 * scale_y]
 
+    # gets image size from DICOM files
     def get_dicom_image_size(self, image_id):
         if self.dicom_dir is None:
-            raise ValueError("DICOM directory is not set.")
+            raise ValueError("DICOM directory not set!")
         dicom_path = os.path.join(self.dicom_dir, f"{image_id}.dicom")
         if not os.path.exists(dicom_path):
             raise FileNotFoundError(f"DICOM file not found: {dicom_path}")
         ds = pydicom.dcmread(dicom_path)
         return ds.Columns, ds.Rows  # width, height
 
+    # plots the bounding boxes on to the image
     def plot_bboxes(self, ax, image, detections, img_width, img_height, title, color_map, 
                     is_florence=False, original_size=None):
         ax.imshow(image, cmap='gray')
@@ -89,8 +98,8 @@ class XRayBBoxVisualizer:
         for detection in detections:
             label = detection['label']
             bbox = detection['bbox']
-            if is_florence:
-                x1, y1, x2, y2 = self.normalize_florence_coordinates(bbox, img_width, img_height)
+            if is_florence:  # only florence predictions needs to transform the normalised coordinates
+                x1, y1, x2, y2 = self.normalise_florence_coordinates(bbox, img_width, img_height)
             elif original_size:
                 x1, y1, x2, y2 = self.scale_ground_truth_coordinates(
                     bbox, original_size[0], original_size[1], img_width, img_height
@@ -101,8 +110,10 @@ class XRayBBoxVisualizer:
             x1, y1 = max(0, x1), max(0, y1)
             x2, y2 = min(img_width, x2), min(img_height, y2)
             width, height = x2 - x1, y2 - y1
+
             if width <= 0 or height <= 0:
                 continue
+            
             rect = patches.Rectangle((x1, y1), width, height, linewidth=2,
                                      edgecolor=color_map.get(label, 'red'), facecolor='none')
             ax.add_patch(rect)
@@ -113,19 +124,20 @@ class XRayBBoxVisualizer:
         colours = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan']
         return {label: colours[i % len(colours)] for i, label in enumerate(sorted(set(all_labels)))}
 
-    def visualize_comparisons(self, num_images=10, figsize=(15, 8), save_dir="comparison_outputs", save_images=True):
+    # plots the images next to each other so they can be compared
+    def visualise_comparisons(self, num_images=10, figsize=(15, 8), save_dir="comparison_outputs", save_images=True):
         if save_images:
             os.makedirs(save_dir, exist_ok=True)
             print(f"Saving comparison images to: {save_dir}")
 
-        print("Loading predictions...")
+        print("Loading predictions")
         predictions = self.load_predictions()
-        print("Loading ground truth...")
+        print("Loading ground truth")
         ground_truth = self.load_ground_truth_from_csv()
 
         common_images = list(set(predictions.keys()) & set(ground_truth.keys()))
         if not common_images:
-            print("No matching images between predictions and ground truth.")
+            print("No matching images between predictions and ground truth")
             return
 
         images_to_plot = common_images[:num_images]
@@ -179,4 +191,4 @@ if __name__ == "__main__":
         image_dir="./output_dataset/train/",
         dicom_dir="./dicom/"
     )
-    visualizer.visualize_comparisons(num_images=10, save_images=True)
+    visualizer.visualise_comparisons(num_images=10, save_images=True)

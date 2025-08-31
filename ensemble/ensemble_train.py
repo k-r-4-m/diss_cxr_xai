@@ -1,3 +1,12 @@
+"""
+    Trains the ensemble model (DenseNet-121 and EfficientNet-B5) on the VinDr-CXR dataset
+
+    Requires:
+        The VinDr-CXR dataset to have been downloaded and preprocessed (vindr_preprocessing_aug.py)
+
+"""
+
+
 import numpy as np
 import pandas as pd
 import cv2 as cv

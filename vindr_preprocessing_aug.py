@@ -1,3 +1,20 @@
+"""
+    Pre-processes and augments the VinDr-CXR dataset.
+
+    Performs:
+        Image scaling
+        Majority voting
+        Data augmentation
+
+    Results in:
+        .png files of each chest X-Ray, split into training and validation sets
+        A jsonl file detailing annotations for each chest X-Ray, with a seperate file for the training and validation sets
+
+    Requires:
+        The VinDr-CXR dataset to have been downloaded and set up correctly
+"""
+
+
 import os
 import torch
 from transformers import get_scheduler, AutoModelForCausalLM, AutoProcessor, AutoConfig  
@@ -297,7 +314,7 @@ def calculate_augmentation_needs(class_counts, target_samples=TARGET_SAMPLES_PER
     return augmentation_needs
 
 
-### run the code, pre-processing images with augmentation ###
+### run the code, pre-processing images with augmentation
 # loads and prepares data
 df = pd.read_csv(ANNOTATIONS_CSV)
 df = df.dropna(subset=['x_min', 'y_min', 'x_max', 'y_max'])  # drop all rows with missing bounding boxes (i.e. no finding)

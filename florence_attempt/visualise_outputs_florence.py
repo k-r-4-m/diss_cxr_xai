@@ -1,3 +1,12 @@
+"""
+    Visualises the outputs of Florence-2 alongside the ground truth using bounding boxes
+
+    Requires:
+        Florence-2 to have been fully trained with a model checkpoint in model_checkpoints/epoch_n
+        A chest X-Ray file name *that is present in the validation dataset* given as an argument when running the file
+"""
+
+
 # need transformers version>=4.53.1
 from transformers import get_scheduler, AutoModelForCausalLM, AutoProcessor, AutoConfig  
 from peft import LoraConfig, get_peft_model
@@ -19,6 +28,7 @@ from florence_tools import *
 import io
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+from matplotlib.lines import Line2D
 import seaborn as sns
 import pandas as pd
 import os
@@ -67,6 +77,7 @@ df = pd.read_csv(ANNOTATIONS_CSV)
 CLASSES = df['class_name'].unique().tolist()
 CLASSES.remove("No finding")  # removes no finding from the classes list
 
+# gets the image given in command line args
 try:
     input_image = sys.argv[1]
 except IndexError:
@@ -135,34 +146,32 @@ else:
     image_np = np.array(image)
 
 
-# -------- colour helpers --------
+# chooses colour based on class
 def class_base_colour(name: str) -> tuple:
-    """
-    Deterministic base colour per class name (RGB in 0-1).
-    Uses HSV with class-hash-based hue so it's stable across runs.
-    """
     h = (hash(name) % 360) / 360.0
     s, v = 0.65, 0.95
     r, g, b = colorsys.hsv_to_rgb(h, s, v)
     return (r, g, b)
 
+# blends between colours
 def blend(c, target, t: float):
-    """Linear blend between colours c and target with weight t in [0,1]."""
     return tuple((1 - t) * c[i] + t * target[i] for i in range(3))
 
-def gt_shade(base):       # lighter shade (towards white)
+# the shade for ground truth boxes (lighter shade)
+def gt_shade(base):
     return blend(base, (1, 1, 1), 0.35)
 
-def pred_shade(base):     # darker shade (towards black)
+# the shade for predicted boxes (darker shade)
+def pred_shade(base):
     return blend(base, (0, 0, 0), 0.35)
 
-# -------- drawing --------
+# draws the bounding boxes
 def draw_overlay(image_pil, target_dets, pred_dets):
     img = np.asarray(image_pil)
     fig, ax = plt.subplots(figsize=(10, 10))
     ax.imshow(img)
 
-    # Ground truth (lighter, solid)
+    # ground truth boxes are lighter in colour and have a solid line
     for xyxy, cname in zip(target_dets.xyxy, target_dets.data['class_name']):
         base = class_base_colour(cname)
         col = gt_shade(base)
@@ -173,7 +182,7 @@ def draw_overlay(image_pil, target_dets, pred_dets):
         ax.text(x1, max(y1 - 4, 0), f"{cname} (GT)", fontsize=10, color=col,
                 bbox=dict(boxstyle="round,pad=0.2", fc='white', ec='none', alpha=0.7))
 
-    # Prediction (darker, dashed)
+    # predicted boxes are darker in colour and have a dotted line
     for xyxy, cname in zip(pred_dets.xyxy, pred_dets.data['class_name']):
         base = class_base_colour(cname)
         col = pred_shade(base)
@@ -184,8 +193,7 @@ def draw_overlay(image_pil, target_dets, pred_dets):
         ax.text(x1, max(y1 - 4, 0), f"{cname} (Pred)", fontsize=9, color=col,
                 bbox=dict(boxstyle="round,pad=0.2", fc='black', ec='none', alpha=0.35))
 
-    # Legend explaining styles (colour varies by class)
-    from matplotlib.lines import Line2D
+    # legend showing which box style is what
     legend_elems = [
         Line2D([0], [0], color='black', lw=2.5, linestyle='-', label='Ground truth'),
         Line2D([0], [0], color='black', lw=2.0, linestyle='--', label='Prediction'),
@@ -197,5 +205,4 @@ def draw_overlay(image_pil, target_dets, pred_dets):
     plt.close()
 
 
-# call it
 draw_overlay(image, target, prediction)

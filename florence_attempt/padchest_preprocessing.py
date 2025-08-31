@@ -1,3 +1,8 @@
+"""
+    Preprocesses PadChest to remove irrelevant findings and to save thhe annotations as a jsonl file in Florence-style
+"""
+
+
 import os
 import pandas as pd
 import json

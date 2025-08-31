@@ -1,3 +1,13 @@
+"""
+    Trains Florence-2 using the VinDr-CXR dataset
+
+    Hyperparameters are set in the config.yaml file
+
+    Requires:
+        VinDr-CXR to have been downloaded and preprocessed (vindr_preprocessing_aug.py)
+"""
+
+
 import os
 import torch
 # need transformers version 4.53.1
@@ -62,29 +72,29 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = AutoModelForCausalLM.from_pretrained(CHECKPOINT, trust_remote_code=True, revision=REVISION).to(DEVICE)
 processor = AutoProcessor.from_pretrained(CHECKPOINT, trust_remote_code=True, revision=REVISION)
 
-# # builds the dataloader for the training set
-# train_dataset = DetectionDataset(
-#     jsonl_file_path = f"{OUTPUT_DIR}/train/annotations.jsonl",
-#     image_directory_path = f"{OUTPUT_DIR}/train/"
-# )
-
-# # builds the dataloader for the validation set
-# val_dataset = DetectionDataset(
-#     jsonl_file_path = f"{OUTPUT_DIR}/valid/annotations.jsonl",
-#     image_directory_path = f"{OUTPUT_DIR}/valid/"
-# )
-
 # builds the dataloader for the training set
 train_dataset = DetectionDataset(
-    jsonl_file_path = f"{OUTPUT_DIR}/train/annotations_caption_to_phrase.jsonl",
+    jsonl_file_path = f"{OUTPUT_DIR}/train/annotations.jsonl",
     image_directory_path = f"{OUTPUT_DIR}/train/"
 )
 
 # builds the dataloader for the validation set
 val_dataset = DetectionDataset(
-    jsonl_file_path = f"{OUTPUT_DIR}/valid/annotations_caption_to_phrase.jsonl",
+    jsonl_file_path = f"{OUTPUT_DIR}/valid/annotations.jsonl",
     image_directory_path = f"{OUTPUT_DIR}/valid/"
 )
+
+# # builds the dataloader for the training set
+# train_dataset = DetectionDataset(
+#     jsonl_file_path = f"{OUTPUT_DIR}/train/annotations_caption_to_phrase.jsonl",
+#     image_directory_path = f"{OUTPUT_DIR}/train/"
+# )
+
+# # builds the dataloader for the validation set
+# val_dataset = DetectionDataset(
+#     jsonl_file_path = f"{OUTPUT_DIR}/valid/annotations_caption_to_phrase.jsonl",
+#     image_directory_path = f"{OUTPUT_DIR}/valid/"
+# )
 
 train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, collate_fn=collate_fn, num_workers=NUM_WORKERS, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, collate_fn=collate_fn, num_workers=NUM_WORKERS)

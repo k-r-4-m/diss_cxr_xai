@@ -1,3 +1,16 @@
+"""
+    Evaluates the classification performance of the ensemble model on the VinDr-CXR dataset
+
+    Outputs:
+        Precision, recall, and F1 per-class and overall
+        Youden's J analysis to analyse what the best thresholds are for classification for each class    
+
+    Requires:
+        The ensemble model to have been trained and for a model checkpoint to be in ensemble_checkpoints/epoch_n
+
+"""
+
+
 import os
 import json
 import numpy as np
@@ -7,6 +20,7 @@ from keras.models import load_model
 from keras.applications.densenet import preprocess_input as densenet_preprocess
 from keras.applications.efficientnet import preprocess_input as efficientnet_preprocess
 from sklearn.metrics import precision_score, recall_score, f1_score, multilabel_confusion_matrix
+from sklearn.metrics import confusion_matrix
 import seaborn as sns
 import re
 import tensorflow as tf
@@ -257,7 +271,7 @@ print(f"Precision: {precision:.4f}")
 print(f"Recall   : {recall:.4f}")
 print(f"F1 Score : {f1:.4f}")
 
-# Generate confusion matrices
+# generate confusion matrices
 print("Generating per-class confusion matrices")
 os.makedirs("confusion_matrices_joint_ensemble", exist_ok=True)
 
@@ -290,7 +304,7 @@ for i, label in enumerate(CLASSES):
 
 print(f"Confusion matrices saved in: confusion_matrices_joint_ensemble/")
 
-# Per-class detailed metrics
+# per-class precision, recall, and F1
 print(f"\nPer-class Results:")
 print(f"{'Class':<20} {'Precision':<10} {'Recall':<8} {'F1':<8}")
 print("-" * 60)
@@ -302,54 +316,48 @@ for i, label in enumerate(CLASSES):
     
     print(f"{label:<20} {prec:<10.3f} {rec:<8.3f} {f1c:<8.3f}")
 
-# testing different thresholds
-print(f"\nThreshold analysis: ")
-thresholds = np.arange(0.1, 0.9, 0.1)
-threshold_results = []
+### testing different thresholds (don't remove)
+# print(f"\nThreshold analysis: ")
+# thresholds = np.arange(0.1, 0.9, 0.1)
+# threshold_results = []
 
-for thresh in thresholds:
-    temp_pred = (y_pred_prob > thresh).astype(int)
-    temp_f1 = f1_score(y_val, temp_pred, average='macro', zero_division=0)
-    temp_precision = precision_score(y_val, temp_pred, average='macro', zero_division=0)
-    temp_recall = recall_score(y_val, temp_pred, average='macro', zero_division=0)
-    threshold_results.append((thresh, temp_f1, temp_precision, temp_recall))
-    print(f"Threshold {thresh:.1f}: F1={temp_f1:.4f}, Prec={temp_precision:.4f}, Rec={temp_recall:.4f}")
+# for thresh in thresholds:
+#     temp_pred = (y_pred_prob > thresh).astype(int)
+#     temp_f1 = f1_score(y_val, temp_pred, average='macro', zero_division=0)
+#     temp_precision = precision_score(y_val, temp_pred, average='macro', zero_division=0)
+#     temp_recall = recall_score(y_val, temp_pred, average='macro', zero_division=0)
+#     threshold_results.append((thresh, temp_f1, temp_precision, temp_recall))
+#     print(f"Threshold {thresh:.1f}: F1={temp_f1:.4f}, Prec={temp_precision:.4f}, Rec={temp_recall:.4f}")
 
-# find the optimal threshold
-best_threshold_idx = np.argmax([result[1] for result in threshold_results])
-best_threshold = threshold_results[best_threshold_idx][0]
-print(f"\nOptimal threshold for F1: {best_threshold:.1f} (F1={threshold_results[best_threshold_idx][1]:.4f})")
+# # find the optimal threshold
+# best_threshold_idx = np.argmax([result[1] for result in threshold_results])
+# best_threshold = threshold_results[best_threshold_idx][0]
+# print(f"\nOptimal threshold for F1: {best_threshold:.1f} (F1={threshold_results[best_threshold_idx][1]:.4f})")
 
 
-# # trying youden's j statistic
-# from sklearn.metrics import confusion_matrix
+### youden's j statistic calculation
+print("\nYouden's J analysis (per class):")
+youden_results = []
 
-# print("\nYouden's J analysis (per class):")
-# youden_results = []
+thresholds = np.arange(0.0, 1.0, 0.01)  # sweeping through with values of 0.01
+best_thresholds = {}
 
-# thresholds = np.arange(0.0, 1.0, 0.01)  # finer sweep than 0.1
-# best_thresholds = {}
-
-# for i, label in enumerate(CLASSES):
-#     y_true = y_val[:, i]
-#     best_j, best_t = -1, None
+for i, label in enumerate(CLASSES):
+    y_true = y_val[:, i]
+    best_j, best_t = -1, None
     
-#     for t in thresholds:
-#         y_pred_t = (y_pred_prob[:, i] > t).astype(int)
-#         tn, fp, fn, tp = confusion_matrix(y_true, y_pred_t, labels=[0,1]).ravel()
+    for t in thresholds:
+        y_pred_t = (y_pred_prob[:, i] > t).astype(int)
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred_t, labels=[0,1]).ravel()
         
-#         sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0
-#         specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
-#         j = sensitivity + specificity - 1
+        sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0
+        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+        j = sensitivity + specificity - 1
         
-#         if j > best_j:
-#             best_j = j
-#             best_t = t
+        if j > best_j:
+            best_j = j
+            best_t = t
     
-#     best_thresholds[label] = best_t
-#     youden_results.append((label, best_t, best_j))
-#     print(f"{label:<20} Best Thresh={best_t:.2f}, J={best_j:.3f}")
-
-# # Example: if you want a single global threshold (mean of all best thresholds)
-# global_optimal_threshold = np.mean(list(best_thresholds.values()))
-# print(f"\nGlobal optimal threshold (mean of per-class best): {global_optimal_threshold:.3f}")
+    best_thresholds[label] = best_t
+    youden_results.append((label, best_t, best_j))
+    print(f"{label:<20} Best Thresh={best_t:.2f}, J={best_j:.3f}")

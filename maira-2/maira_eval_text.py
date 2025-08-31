@@ -7,6 +7,8 @@
         ROUGE-L (longest common subsequence)
 
     REQUIRES TRANSFORMERS==4.51.3 !!!
+
+    Also requires a HuggingFace token that should be placed in token_file.yaml
 """
 
 import os
@@ -14,6 +16,7 @@ import re
 import json
 import yaml
 import string
+from datetime import datetime
 from collections import defaultdict
 from difflib import get_close_matches
 import numpy as np
@@ -47,11 +50,6 @@ with open("./token_file.yaml", 'r') as f:
     token_file = yaml.safe_load(f)
     hf_token = token_file.get('hf_token')
 login(hf_token)
-
-df = pd.read_csv(ANNOTATIONS_CSV)
-CLASSES = df['class_name'].unique().tolist()
-if "No finding" in CLASSES:
-    CLASSES.remove("No finding")
 
 ### loads model
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")

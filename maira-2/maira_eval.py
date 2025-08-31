@@ -6,6 +6,8 @@
         Localisation performance (mean average precision)
 
     REQUIRES TRANSFORMERS==4.51.3 !!!
+
+    Also requires a HuggingFace token that should be placed in token_file.yaml
 """
 
 import os
@@ -297,66 +299,6 @@ def parse_maira_prediction_to_detections(maira_output, img_size: Tuple[int, int]
         confidence=np.array(confs, dtype=float),
     )
 
-    # for finding_text, bboxes in maira_list:
-    #     if not isinstance(finding_text, str):
-    #         continue
-
-    #     # skip negated findings
-    #     if is_negated(finding_text):
-    #         continue
-
-    #     norm_finding = normalise_finding(finding_text)
-    #     if norm_finding is None or norm_finding not in CLASSES:
-    #         print("None finding")
-    #         continue
-
-    #     cid = CLASSES.index(norm_finding)
-
-    #     if bboxes is not None and len(bboxes) > 0:  # maira sometimes responds with bboxes as None
-    #         for (x1n, y1n, x2n, y2n) in bboxes:
-    #             x1 = clamp(x1n * W, 0, W)
-    #             y1 = clamp(y1n * H, 0, H)
-    #             x2 = clamp(x2n * W, 0, W)
-    #             y2 = clamp(y2n * H, 0, H)
-    #             x_min, x_max = sorted([x1, x2])
-    #             y_min, y_max = sorted([y1, y2])
-    #             xyxy.append([x_min, y_min, x_max, y_max])
-    #             class_ids.append(cid)
-    #             confs.append(1.0)
-    #     else:
-    #         # keep class mention even without grounding
-    #         xyxy.append([1.0, 1.0, 2.0, 2.0])  # just a 1x1 bounding box in the top left
-    #         class_ids.append(cid)
-    #         confs.append(1.0)
-
-    #     # finding_lc = finding_text.lower()
-
-    #     # for cid, cname in enumerate(CLASSES):
-    #     #     if cname.lower() in finding_lc:
-    #     #         if bboxes is not None and len(bboxes) > 0:  # maira sometimes responds with bboxes as None
-    #     #             for (x1n, y1n, x2n, y2n) in bboxes:
-    #     #                 x1 = clamp(x1n * W, 0, W)
-    #     #                 y1 = clamp(y1n * H, 0, H)
-    #     #                 x2 = clamp(x2n * W, 0, W)
-    #     #                 y2 = clamp(y2n * H, 0, H)
-    #     #                 x_min, x_max = sorted([x1, x2])
-    #     #                 y_min, y_max = sorted([y1, y2])
-    #     #                 xyxy.append([x_min, y_min, x_max, y_max])
-    #     #                 class_ids.append(cid)
-    #     #                 confs.append(1.0)
-    #     #         else:  # keep class mention even without grounding
-    #     #             xyxy.append([1.0, 1.0, 2.0, 2.0])  # just a 1x1 bounding box in the top left
-    #     #             class_ids.append(cid)
-    #     #             confs.append(1.0)
-
-    # if not xyxy:
-    #     return sv.Detections.empty()
-
-    # return sv.Detections(
-    #     xyxy=np.array(xyxy, dtype=float),
-    #     class_id=np.array(class_ids, dtype=int),
-    #     confidence=np.array(confs, dtype=float),
-    # )
 
 # handles cases where maira-2 repeats findings cyclically
 def clean_repetitive_generation(decoded_text):
@@ -447,18 +389,20 @@ def draw_bboxes_on_image(image, detections, title, class_names):
 # plots the two bounding boxed images side by side
 def create_side_by_side_visualization(image, gt_detections, pred_detections, class_names, image_name, save_dir="visualizations"):
     os.makedirs(save_dir, exist_ok=True)
-    # Draw bboxes on images
+
+    # draws the bounding boxes on the images
     gt_image = draw_bboxes_on_image(image, gt_detections, "Ground Truth", class_names)
     pred_image = draw_bboxes_on_image(image, pred_detections, "Predictions", class_names)
 
-    # Create side-by-side plot
+    # creates a side by side plot
     fig, axes = plt.subplots(1, 2, figsize=(20, 10))
 
-    # Ground truth subplot
+    # subplot for the ground truth
     axes[0].imshow(gt_image)
     axes[0].set_title(f"Ground Truth - {image_name}", fontsize=14, fontweight='bold')
     axes[0].axis('off')
-    # Add ground truth statistics
+
+    # add ground truth stats
     gt_counts = {}
 
     if len(gt_detections) > 0:
@@ -470,12 +414,12 @@ def create_side_by_side_visualization(image, gt_detections, pred_detections, cla
     axes[0].text(0.02, 0.98, gt_text, transform=axes[0].transAxes, fontsize=10,
                 verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
 
-    # Predictions subplot
+    # subplot for the predictions
     axes[1].imshow(pred_image)
     axes[1].set_title(f"Predictions - {image_name}", fontsize=14, fontweight='bold')
     axes[1].axis('off')
 	
-    # Add prediction statistics
+    # add prediction stats
     pred_counts = {}
     if len(pred_detections) > 0:
         for class_id in pred_detections.class_id:
@@ -486,7 +430,7 @@ def create_side_by_side_visualization(image, gt_detections, pred_detections, cla
     axes[1].text(0.02, 0.98, pred_text, transform=axes[1].transAxes, fontsize=10,
                 verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
 
-    # Add color legend
+    # adds colour legend
     legend_elements = []
     for class_name, color in CLASS_COLOR_MAP.items():
         legend_elements.append(plt.Rectangle((0,0),1,1, facecolor=[c/255 for c in color], label=class_name))
@@ -496,7 +440,7 @@ def create_side_by_side_visualization(image, gt_detections, pred_detections, cla
 
     plt.tight_layout()
 
-    # Save the visualization
+    # saves the plot
     save_path = os.path.join(save_dir, f"{sanitize_filename(image_name)}_comparison.png")
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close()
@@ -584,11 +528,6 @@ with open(ANNOTATIONS_JSON, "r") as f:
         pred = parse_maira_prediction_to_detections(maira_output, (W, H))
         predictions.append(pred)
 
-        # # Create side-by-side visualization for this image
-        # image_name = os.path.splitext(item["image"])[0]
-        # viz_path = create_side_by_side_visualization(image, gt, pred, CLASSES, image_name)
-        # print(f"Saved visualization: {viz_path}")
-
 
 ### calculates mAP scores
 mean_average_precision = sv.MeanAveragePrecision.from_detections(
@@ -601,7 +540,7 @@ print(f"map50_95: {mean_average_precision.map50_95:.2f}")
 
 # compute mAP per class
 def compute_map_per_class(predictions, targets, class_id, iou_thresholds=[0.5, 0.75]):
-    # Filter predictions and targets for this class
+    # filter predictions and targets for this class
     class_preds = []
     class_gts = []
     for pred, gt in zip(predictions, targets):
@@ -610,87 +549,19 @@ def compute_map_per_class(predictions, targets, class_id, iou_thresholds=[0.5, 0
         class_preds.append(pred_cls)
         class_gts.append(gt_cls)
 
-    # Use supervision's helper to compute per-class mAP
+    # calculates per-class mAP
     map_metrics = sv.MeanAveragePrecision.from_detections(
         predictions=class_preds,
         targets=class_gts,
     )
     return map_metrics.map50, map_metrics.map75, map_metrics.map50_95
 
-# Compute for all classes
+# computes for all classes
 print("\nPer-class mAP values:")
 for class_id, class_name in enumerate(CLASSES):
     map50, map75, map50_95 = compute_map_per_class(predictions, targets, class_id)
     print(f"{class_name}: mAP@50={map50:.3f}, mAP@75={map75:.3f}, mAP@50-95={map50_95:.3f}")
 
-
-# # confusion matrix
-# conf_matrix = sv.ConfusionMatrix.from_detections(predictions=predictions, targets=targets, classes=CLASSES)
-# fig = conf_matrix.plot()
-# fig.savefig("confusion_matrix_maira2.png", dpi=300, bbox_inches='tight')
-
-# # per class IoU
-# def compute_per_class_iou(preds, gts, num_classes):
-#     iou_per_class = defaultdict(list)
-#     for pred, gt in zip(preds, gts):
-#         for cls in range(num_classes):
-#             pred_cls = pred[pred.class_id == cls]
-#             gt_cls = gt[gt.class_id == cls]
-#             if len(gt_cls) == 0 and len(pred_cls) == 0:
-#                 continue
-#             iou_matrix = box_iou_batch(gt_cls.xyxy, pred_cls.xyxy)
-#             if iou_matrix.size == 0:
-#                 continue
-#             matched_pred, matched_gt = set(), set()
-#             for gt_idx, ious in enumerate(iou_matrix):
-#                 if ious.size == 0:
-#                     continue
-#                 best_pred_idx = np.argmax(ious)
-#                 iou = ious[best_pred_idx]
-#                 if iou >= 0.5 and best_pred_idx not in matched_pred:
-#                     iou_per_class[cls].append(iou)
-#                     matched_pred.add(best_pred_idx)
-#                     matched_gt.add(gt_idx)
-#     avg_iou_per_class = {CLASSES[cls]: np.mean(lst) if lst else 0.0 for cls, lst in iou_per_class.items()}
-#     for cls in range(num_classes):
-#         if CLASSES[cls] not in avg_iou_per_class:
-#             avg_iou_per_class[CLASSES[cls]] = 0.0
-#     return avg_iou_per_class
-
-# iou_scores = compute_per_class_iou(predictions, targets, len(CLASSES))
-# print("\nPer-class IoU:")
-# for cls, val in iou_scores.items():
-#     print(f"{cls}: IoU = {val:.3f}")
-
-# # precision, recall, F1
-# conf_mat = conf_matrix.matrix
-# precision_per_class, recall_per_class, f1_per_class = {}, {}, {}
-# for i, class_name in enumerate(CLASSES):
-#     TP = conf_mat[i, i]
-#     FP = conf_mat[:, i].sum() - TP
-#     FN = conf_mat[i, :].sum() - TP
-#     # FP = conf_mat[i, :].sum() - TP   # row = predictions
-#     # FN = conf_mat[:, i].sum() - TP   # col = ground truth
-#     precision = TP / (TP + FP) if TP + FP > 0 else 0.0
-#     recall = TP / (TP + FN) if TP + FN > 0 else 0.0
-#     precision_per_class[class_name] = precision
-#     recall_per_class[class_name] = recall
-#     f1_per_class[class_name] = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
-
-# overall_precision = np.mean(list(precision_per_class.values()))
-# overall_recall = np.mean(list(recall_per_class.values()))
-# overall_f1 = np.mean(list(f1_per_class.values()))
-
-# print("\nPer-class precision, recall, F1:")
-# for cls in CLASSES:
-#     print(f"{cls}: precision = {precision_per_class[cls]:.3f}, "
-#           f"recall = {recall_per_class[cls]:.3f}, "
-#           f"f1 = {f1_per_class[cls]:.3f}")
-
-# print("\nIoU precision, recall, F1:")
-# print(f"precision = {overall_precision:.3f}")
-# print(f"recall = {overall_recall:.3f}")
-# print(f"f1 = {overall_f1:.3f}")
 
 ### classification without iou
 y_true_multi, y_pred_multi = [], []

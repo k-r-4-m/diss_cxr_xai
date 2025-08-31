@@ -1,3 +1,16 @@
+"""
+    Evaluates the performance of Florence on the PadChest-GR dataset for textual radiology report generation
+
+    Outputs the following:
+        BLEU-1 (1-gram precision)
+        BLEU-4 (4-gram precision)
+        ROUGE-L (longest common subsequence)
+
+    Requires:
+        Florence to have been pretrained with a model checkpoint stored in model_checkpoints/epoch_n
+        PadChest to have been downloaded and preprocessed
+"""
+
 import os
 import torch
 from transformers import AutoModelForCausalLM, AutoProcessor, AutoConfig

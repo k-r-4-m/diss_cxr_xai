@@ -77,6 +77,23 @@ df = pd.read_csv(ANNOTATIONS_CSV)
 CLASSES = df['class_name'].unique().tolist()
 CLASSES.remove("No finding")  # removes no finding from the classes list
 
+CLASS_COLOURS = {
+    "aortic enlargement": "#ff0000",
+    "atelectasis": "#1e77b4",
+    "calcification": "#ff7f0e",
+    "cardiomegaly": "#008000",
+    "consolidation": "#9366bd",
+    "ild": "#8c564b",
+    "infiltration": "#efb3dd",
+    "lung opacity": "#a52a2a",
+    "nodule/mass": "#aec7e8",
+    "other lesion": "#FFDA0A",
+    "pleural effusion": "#808000",
+    "pleural thickening": "#06fafa",
+    "pneumothorax": "#ffba78",
+    "pulmonary fibrosis": "#c5b0d4"
+}
+
 # gets the image given in command line args
 try:
     input_image = sys.argv[1]
@@ -147,10 +164,10 @@ else:
 
 
 # chooses colour based on class
-def class_base_colour(name: str) -> tuple:
-    h = (hash(name) % 360) / 360.0
-    s, v = 0.65, 0.95
-    r, g, b = colorsys.hsv_to_rgb(h, s, v)
+def class_base_colour(cname: str) -> tuple:
+    hexcol = CLASS_COLOURS.get(cname.lower(), "#808080")  # fallback grey
+    hexcol = hexcol.lstrip('#')
+    r, g, b = tuple(int(hexcol[i:i+2], 16) / 255 for i in (0, 2, 4))
     return (r, g, b)
 
 # blends between colours

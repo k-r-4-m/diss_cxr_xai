@@ -33,14 +33,13 @@ BATCH_SIZE = 10
 NUM_WORKERS = 0
 EPOCHS = 3
 LR = cfg.get("lr", 5e-6)
-USE_PEFT = True
+USE_PEFT = False
 # REVISION = cfg.get("revision", None)
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # converts florence suffixes to maira grounded sequences
-LOC_RE = re.compile(r"<loc_(\d+)>", flags=re.I)
-
+LOC_RE = re.compile(r"<loc_(\d+)>", flags=re.I)  # finds florence loc tags
 def suffix_to_maira_grounded(suffix: str) -> str:
     if not suffix or not suffix.strip():
         return ""  # empty target (no findings)
@@ -215,12 +214,12 @@ if USE_PEFT:
 
 ### forms dataset and dataloaders
 train_ds = MairaReportingDataset(ANNOTATIONS_JSON_TRAIN, IMAGE_DIR_TRAIN)
-val_ds   = MairaReportingDataset(ANNOTATIONS_JSON_VAL, IMAGE_DIR_VAL)
+val_ds = MairaReportingDataset(ANNOTATIONS_JSON_VAL, IMAGE_DIR_VAL)
 
 collate_fn = make_collate_fn(processor, max_length=2048)
 
 train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn, num_workers=NUM_WORKERS)
-val_loader   = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn, num_workers=NUM_WORKERS)
+val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn, num_workers=NUM_WORKERS)
 
 
 optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=LR)

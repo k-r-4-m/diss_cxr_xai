@@ -74,7 +74,7 @@ CLASS_COLOURS = {
     "infiltration": "#efb3dd",
     "lung opacity": "#a52a2a",
     "nodule/mass": "#aec7e8",
-    "other lesion": "#979696",
+    "other lesion": "#FFDA0A",
     "pleural effusion": "#808000",
     "pleural thickening": "#06fafa",
     "pneumothorax": "#ffba78",
@@ -93,7 +93,7 @@ CLASS_SYNONYMS = {
     "consolidation": ["lung consolidation", "consolidative opacity"],
     "ild": ["interstitial lung disease", "interstitial prominence", "interstitial lung"],
     "infiltration": ["infiltrates", "infiltrate"],
-    "lung opacity": ["increased density in the right", "increased density in the left"],
+    "lung opacity": ["increased density in the"],
     "nodule/mass": ["mass", "nodule", "calcified granuloma", "nodular density", "granulomas"],
     "other lesion": ["subcutaneous emphysema"],
     "pleural effusion": ["pleural fluid", "effusion", "effusions", "fluid in pleural space"],
@@ -332,26 +332,32 @@ def parse_maira_prediction_to_detections(decoded_text: str, img_size: Tuple[int,
 
         # skip negated findings
         if is_negated(text_block):
+            print(f"Skipping negated finding: {text_block}")
             continue
 
-        mapped = normalise_finding(text_block)
-        if mapped is None:
-            continue
-
-        cid = CLASSES.index(mapped)
-
-        # look for <box> inside this <obj>
+        # Only process findings that have bounding boxes
         box_match = re.search(r"<box><x(\d+)><y(\d+)><x(\d+)><y(\d+)>", text_block)
-        if box_match:
-            x1, y1, x2, y2 = map(int, box_match.groups())
-            x1, x2 = (x1/1000.0)*W, (x2/1000.0)*W
-            y1, y2 = (y1/1000.0)*H, (y2/1000.0)*H
-            xyxy.append([x1, y1, x2, y2])
-            class_ids.append(cid)
-            confs.append(1.0)
-        else:
-            # record unlocalised finding
-            unlocalised.append(mapped)
+        if not box_match:
+            print(f"No bounding box found for: {text_block}")
+            continue
+
+        # Extract and clean the text (remove box tags)
+        clean_text = re.sub(r"<box>.*?</box>", "", text_block).strip()
+        
+        mapped = normalise_finding(clean_text)
+        if mapped is None:
+            print(f"Could not map finding to known class: {clean_text}")
+            continue
+
+        print(f"Successfully mapped '{clean_text}' to class '{mapped}'")
+        
+        cid = CLASSES.index(mapped)
+        x1, y1, x2, y2 = map(int, box_match.groups())
+        x1, x2 = (x1/1000.0)*W, (x2/1000.0)*W
+        y1, y2 = (y1/1000.0)*H, (y2/1000.0)*H
+        xyxy.append([x1, y1, x2, y2])
+        class_ids.append(cid)
+        confs.append(1.0)
 
     if not xyxy:
         dets = sv.Detections.empty()
@@ -363,7 +369,19 @@ def parse_maira_prediction_to_detections(decoded_text: str, img_size: Tuple[int,
         )
         dets.data['class_name'] = [CLASSES[cid] for cid in dets.class_id]
 
-    # always attach unlocalised predictions as metadata
+    # For unlocalised findings, process findings without boxes that aren't negated
+    for obj in re.findall(r"<obj>(.*?)</obj>", decoded_text, flags=re.DOTALL | re.IGNORECASE):
+        text_block = obj.strip()
+        
+        # Skip negated findings and findings with boxes (already processed above)
+        if is_negated(text_block) or re.search(r"<box>", text_block):
+            continue
+            
+        mapped = normalise_finding(text_block)
+        if mapped is not None:
+            unlocalised.append(mapped)
+
+    # Always attach unlocalised predictions as metadata
     dets.data['unlocalised'] = unlocalised
     return dets
 
@@ -467,12 +485,13 @@ def gt_shade(base):       # lighter shade (towards white)
 def pred_shade(base):     # darker shade (towards black)
     return blend(base, (0, 0, 0), 0.35)
 
-def adjust_lightness(hex_colour, factor=1.2):
-    """Brighten or darken a hex colour."""
-    rgb = mcolors.to_rgb(hex_colour)
-    h, l, s = mcolors.rgb_to_hls(*rgb)
-    new_rgb = mcolors.hls_to_rgb(h, max(0, min(1, l*factor)), s)
-    return mcolors.to_hex(new_rgb)
+# brighten or darken a hex colour
+def adjust_lightness(color: str, amount: float = 1.0) -> str:
+    rgb = mcolors.to_rgb(color)  # (r,g,b) in [0,1]
+    h, l, s = colorsys.rgb_to_hls(*rgb)
+    l = max(0, min(1, l * amount))
+    r, g, b = colorsys.hls_to_rgb(h, l, s)
+    return mcolors.to_hex([r, g, b])
 
 def draw_overlay(image_pil, target_dets, pred_dets, save_path="maira_output_visualised.png"):
     img = np.asarray(image_pil)
@@ -482,7 +501,7 @@ def draw_overlay(image_pil, target_dets, pred_dets, save_path="maira_output_visu
     # --- Ground truth (solid, slightly lighter) ---
     if target_dets is not None and len(target_dets) > 0:
         for xyxy, cname in zip(target_dets.xyxy, target_dets.data['class_name']):
-            base = CLASS_COLOURS.get(cname, "#aaaaaa")
+            base = CLASS_COLOURS.get(cname.lower(), "#808080")  # default grey if missing
             col = adjust_lightness(base, 1.0)  # keep normal/light
             x1, y1, x2, y2 = xyxy
             rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1,
@@ -494,7 +513,7 @@ def draw_overlay(image_pil, target_dets, pred_dets, save_path="maira_output_visu
     # --- Prediction (dashed, darker) ---
     if pred_dets is not None and len(pred_dets) > 0:
         for xyxy, cname in zip(pred_dets.xyxy, pred_dets.data['class_name']):
-            base = CLASS_COLOURS.get(cname, "#aaaaaa")
+            base = CLASS_COLOURS.get(cname.lower(), "#808080")  # default grey if missing
             col = adjust_lightness(base, 0.7)  # darker for prediction
             x1, y1, x2, y2 = xyxy
             rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1,

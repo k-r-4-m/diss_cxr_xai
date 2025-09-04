@@ -24,6 +24,7 @@ from tqdm import tqdm
 from typing import List, Tuple
 import torch
 from transformers import AutoModelForCausalLM, AutoProcessor, AutoConfig
+from peft import PeftModel
 from huggingface_hub import login
 import supervision as sv
 from supervision.detection.utils import box_iou_batch
@@ -449,13 +450,56 @@ def create_side_by_side_visualization(image, gt_detections, pred_detections, cla
 
 
 ### loads model
+BASE_MODEL = "microsoft/maira-2"
+CHECKPOINT_PATH = "./maira_checkpoints/epoch_3"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-CHECKPOINT = "microsoft/maira-2"
-model = AutoModelForCausalLM.from_pretrained(CHECKPOINT, trust_remote_code=True)
-processor = AutoProcessor.from_pretrained(CHECKPOINT, trust_remote_code=True)
 
-model = model.eval()
-model = model.to(DEVICE)
+def setup_model_for_evaluation():
+    print("🚀 Setting up model for evaluation...")
+    
+    # 1. Load config from base model
+    print("1. Loading config...")
+    config = AutoConfig.from_pretrained(BASE_MODEL, trust_remote_code=True)
+    
+    # 2. Load base model
+    print("2. Loading base model...")
+    base_model = AutoModelForCausalLM.from_pretrained(
+        BASE_MODEL,
+        config=config,
+        trust_remote_code=True,
+        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
+    ).to(DEVICE)
+    
+    # 3. Load your trained adapters
+    print("3. Loading trained adapters...")
+    model = PeftModel.from_pretrained(base_model, CHECKPOINT_PATH)
+    
+    # 4. Load processor
+    print("4. Loading processor...")
+    try:
+        # Try loading from checkpoint first
+        processor = AutoProcessor.from_pretrained(CHECKPOINT_PATH, trust_remote_code=True)
+        print("   ✅ Loaded processor from checkpoint")
+    except:
+        # Fallback to base model processor
+        processor = AutoProcessor.from_pretrained(BASE_MODEL, trust_remote_code=True)
+        print("   ✅ Loaded processor from base model")
+    
+    # 5. Set to eval mode
+    model.eval()
+    
+    print("🎉 Model setup complete!")
+    
+    # Print some info
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"📊 Total parameters: {total_params:,}")
+    print(f"🎯 Trainable parameters: {trainable_params:,}")
+    print(f"💾 Model device: {next(model.parameters()).device}")
+    
+    return model, processor, config
+
+model, processor, config = setup_model_for_evaluation()
 
 # gets num of total parameters
 total_params = sum(p.numel() for p in model.parameters())
@@ -538,7 +582,7 @@ print(f"map50: {mean_average_precision.map50:.2f}")
 print(f"map75: {mean_average_precision.map75:.2f}")
 print(f"map50_95: {mean_average_precision.map50_95:.2f}")
 
-# compute mAP per class
+# compute AP per class
 def compute_map_per_class(predictions, targets, class_id, iou_thresholds=[0.5, 0.75]):
     # filter predictions and targets for this class
     class_preds = []
@@ -549,7 +593,8 @@ def compute_map_per_class(predictions, targets, class_id, iou_thresholds=[0.5, 0
         class_preds.append(pred_cls)
         class_gts.append(gt_cls)
 
-    # calculates per-class mAP
+    # compute per-class AP
+    # uses the mAP object, but is just doing over 1 class, so it's just AP
     map_metrics = sv.MeanAveragePrecision.from_detections(
         predictions=class_preds,
         targets=class_gts,
@@ -557,10 +602,10 @@ def compute_map_per_class(predictions, targets, class_id, iou_thresholds=[0.5, 0
     return map_metrics.map50, map_metrics.map75, map_metrics.map50_95
 
 # computes for all classes
-print("\nPer-class mAP values:")
+print("\nPer-class AP values:")
 for class_id, class_name in enumerate(CLASSES):
-    map50, map75, map50_95 = compute_map_per_class(predictions, targets, class_id)
-    print(f"{class_name}: mAP@50={map50:.3f}, mAP@75={map75:.3f}, mAP@50-95={map50_95:.3f}")
+    ap50, ap75, ap50_95 = compute_map_per_class(predictions, targets, class_id)
+    print(f"{class_name}: AP@50={ap50:.3f}, AP@75={ap75:.3f}, AP@50-95={ap50_95:.3f}")
 
 
 ### classification without iou

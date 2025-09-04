@@ -76,3 +76,4 @@ florence_attempt/exctract_findings_text_florence.py
 florence_attempt/old_files/*
 maira-2/OLD_maira_train.py
 maira-2/OLD_maira_train_2.py
+compare_text.py

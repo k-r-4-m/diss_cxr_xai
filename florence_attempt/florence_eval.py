@@ -168,7 +168,8 @@ def compute_map_per_class(predictions, targets, class_id, iou_thresholds=[0.5, 0
         class_preds.append(pred_cls)
         class_gts.append(gt_cls)
 
-    # compute per-class mAP
+    # compute per-class AP
+    # uses the mAP object, but is just doing over 1 class, so it's just AP
     map_metrics = sv.MeanAveragePrecision.from_detections(
         predictions=class_preds,
         targets=class_gts,
@@ -176,10 +177,10 @@ def compute_map_per_class(predictions, targets, class_id, iou_thresholds=[0.5, 0
     return map_metrics.map50, map_metrics.map75, map_metrics.map50_95
 
 # compute for all classes
-print("\nPer-class mAP values:")
+print("\nPer-class AP values:")
 for class_id, class_name in enumerate(CLASSES):
-    map50, map75, map50_95 = compute_map_per_class(predictions, targets, class_id)
-    print(f"{class_name}: mAP@50={map50:.3f}, mAP@75={map75:.3f}, mAP@50-95={map50_95:.3f}")
+    ap50, ap75, ap50_95 = compute_map_per_class(predictions, targets, class_id)
+    print(f"{class_name}: AP@50={ap50:.3f}, AP@75={ap75:.3f}, AP@50-95={ap50_95:.3f}")
 
 
 ### classification-style metrics without considering IoU

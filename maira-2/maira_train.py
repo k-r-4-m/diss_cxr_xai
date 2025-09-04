@@ -1,5 +1,5 @@
 """
-    Trains Florence-2 using the VinDr-CXR dataset
+    Trains MAIRA-2 using the VinDr-CXR dataset
 
     Hyperparameters have been set manually in the file since they differ from Florence quite a bit
 
@@ -15,7 +15,7 @@ import yaml
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
-from transformers import AutoModelForCausalLM, AutoProcessor, get_scheduler
+from transformers import AutoModelForCausalLM, AutoProcessor, get_scheduler, AutoConfig
 from peft import LoraConfig, get_peft_model
 from PIL import Image
 
@@ -29,11 +29,11 @@ ANNOTATIONS_JSON_TRAIN = f"{OUTPUT_DIR}/train/annotations.jsonl"
 ANNOTATIONS_JSON_VAL = f"{OUTPUT_DIR}/valid/annotations.jsonl"
 IMAGE_DIR_TRAIN = f"{OUTPUT_DIR}/train/"
 IMAGE_DIR_VAL = f"{OUTPUT_DIR}/valid/"
-BATCH_SIZE = 10
+BATCH_SIZE = 1
 NUM_WORKERS = 0
 EPOCHS = 3
-LR = cfg.get("lr", 5e-6)
-USE_PEFT = False
+LR = 5e-6
+USE_PEFT = True
 # REVISION = cfg.get("revision", None)
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -67,7 +67,7 @@ def suffix_to_maira_grounded(suffix: str) -> str:
         i = j
         if len(locs) >= 4:
             x1, y1, x2, y2 = locs[:4]
-            out_objs.append(f"<obj>{label}<box>{x1} {y1} {x2} {y2}</box></obj>")
+            out_objs.append(f"<obj>{label}<box><x{x1}><y{y1}><x{x2}><y{y2}></box></obj>")
         else:
             out_objs.append(f"<obj>{label}</obj>")
     return " ".join(out_objs)
@@ -109,6 +109,7 @@ def make_collate_fn(processor, max_length=2048):
         all_pixel_values = []
         all_input_ids = []
         all_attention_masks = []
+        all_labels = []
 
         for ex in batch:
             image = ex["image"]
@@ -126,14 +127,15 @@ def make_collate_fn(processor, max_length=2048):
                 return_tensors="pt",
                 get_grounding=True,
             )
+
             # squeeze batch dim
             base = {k: v.squeeze(0) for k, v in base.items()}
 
-            # base should contain 'input_ids' that include image token placeholders
-            base_input_ids = base["input_ids"]  # (L_base,)
+            # base should contain 'input_ids' that include image token placeholders 
+            base_input_ids = base["input_ids"]
             base_attention_mask = base.get("attention_mask", torch.ones_like(base_input_ids))
 
-            # tokenise target_text WITHOUT adding special tokens (assumed that base contains BOS/prompt)
+            # tokenise target text and add EOS token
             tgt_tokenized = processor.tokenizer(
                 target_text,
                 add_special_tokens=False,
@@ -141,60 +143,73 @@ def make_collate_fn(processor, max_length=2048):
                 truncation=True,
             )
             tgt_ids = tgt_tokenized.input_ids.squeeze(0) if tgt_tokenized.input_ids.numel() else torch.tensor([], dtype=torch.long)
+            
+            # adds EOS token to target
+            if processor.tokenizer.eos_token_id is not None:
+                eos_token = torch.tensor([processor.tokenizer.eos_token_id], dtype=torch.long)
+                tgt_ids = torch.cat([tgt_ids, eos_token], dim=0)
 
-            # concatenate
-            full_input_ids = torch.cat([base_input_ids, tgt_ids], dim=0)  # (L_full,)
+            # concatenate base prompt and target
+            full_input_ids = torch.cat([base_input_ids, tgt_ids], dim=0)
             full_attention_mask = torch.cat([base_attention_mask, torch.ones_like(tgt_ids)], dim=0)
 
-            # collect pixel_values (already preprocessed by base)
-            pixel_values = base["pixel_values"]  # (C,H,W)
+            # set base prompt tokens to -100 (ignore in loss)
+            labels = full_input_ids.clone()
+            labels[:len(base_input_ids)] = -100  # mask base prompt
+            # keep target text tokens for training
+
+            pixel_values = base["pixel_values"]
 
             all_pixel_values.append(pixel_values)
             all_input_ids.append(full_input_ids)
             all_attention_masks.append(full_attention_mask)
+            all_labels.append(labels)
 
-        # pad sequences to max length in batch but cap at max_length
+        # pad sequences to max length in batch but cap at max_length 
         batch_max_len = min(max(len(x) for x in all_input_ids), max_length)
 
-        padded_input_ids = torch.full((len(all_input_ids), batch_max_len), fill_value=processor.tokenizer.pad_token_id, dtype=torch.long)
+        padded_input_ids = torch.full((len(all_input_ids), batch_max_len), 
+                                    fill_value=processor.tokenizer.pad_token_id, dtype=torch.long)
         padded_attention_mask = torch.zeros((len(all_attention_masks), batch_max_len), dtype=torch.long)
+        padded_labels = torch.full((len(all_labels), batch_max_len), fill_value=-100, dtype=torch.long)
 
-        for i, (ids, att) in enumerate(zip(all_input_ids, all_attention_masks)):
+        for i, (ids, att, lbl) in enumerate(zip(all_input_ids, all_attention_masks, all_labels)):
             L = min(ids.size(0), batch_max_len)
             padded_input_ids[i, :L] = ids[:L]
             padded_attention_mask[i, :L] = att[:L]
+            padded_labels[i, :L] = lbl[:L]
 
-        # labels: copy of input_ids but masked where attention_mask == 0 (pad) -> -100
-        labels = padded_input_ids.clone()
-        labels[padded_attention_mask == 0] = -100
+        # labels: copy of input_ids but masked where attention_mask == 0 (pad) -> -100 
+        padded_labels[padded_attention_mask == 0] = -100
 
-        # stack pixel_values (they can have same shape per your processor)
         pixel_values_batch = torch.stack(all_pixel_values, dim=0)
 
         # move to the device (cuda, cpu, etc.)
         pixel_values_batch = pixel_values_batch.to(DEVICE)
         padded_input_ids = padded_input_ids.to(DEVICE)
         padded_attention_mask = padded_attention_mask.to(DEVICE)
-        labels = labels.to(DEVICE)
+        padded_labels = padded_labels.to(DEVICE)
 
-        out = {
-            "pixel_values": pixel_values_batch,       # (B, C, H, W)
-            "input_ids": padded_input_ids,            # (B, L)
-            "attention_mask": padded_attention_mask,  # (B, L)
-            "labels": labels,
+        return {
+            "pixel_values": pixel_values_batch,
+            "input_ids": padded_input_ids,
+            "attention_mask": padded_attention_mask,
+            "labels": padded_labels,  # Now properly masked
             "image_names": [b.get("image_name") for b in batch],
         }
-        return out
     return collate_fn
 
 
 ### loads maira
 CHECKPOINT = "microsoft/maira-2"
 print("Loading MAIRA and processor...")
+
+config = AutoConfig.from_pretrained(CHECKPOINT, trust_remote_code=True)
+config.vision_config.model_type = 'davit'
 model = AutoModelForCausalLM.from_pretrained(CHECKPOINT, trust_remote_code=True).to(DEVICE)
 processor = AutoProcessor.from_pretrained(CHECKPOINT, trust_remote_code=True)
 
-# freeze image encoder (heuristic name matching)
+# freeze image encoder
 for name, param in model.named_parameters():
     if any(k in name.lower() for k in ("vision", "image", "encoder", "vit", "rad", "dino")):
         param.requires_grad = False

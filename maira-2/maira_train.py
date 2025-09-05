@@ -67,10 +67,10 @@ def suffix_to_maira_grounded(suffix: str) -> str:
         i = j
         if len(locs) >= 4:
             x1, y1, x2, y2 = locs[:4]
-            out_objs.append(f"<obj>{label}<box><x{x1}><y{y1}><x{x2}><y{y2}></box></obj>")
+            out_objs.append(f"<obj> {label}<box><x{x1}><y{y1}><x{x2}><y{y2}></box></obj>")
         else:
-            out_objs.append(f"<obj>{label}</obj>")
-    return " ".join(out_objs)
+            out_objs.append(f"<obj> {label}</obj>")
+    return "".join(out_objs)
 
 # creates a dataset for maira
 # returns an image and a prompted target_text
@@ -94,12 +94,9 @@ class MairaReportingDataset(Dataset):
 
         # builds maira-style grounded target
         grounded = suffix_to_maira_grounded(item.get("suffix", ""))
-        prefix = item.get("prefix", "")
-        # combine prefix and grounded sequence as the target/prompt for maira
-        if prefix and prefix.strip():
-            target_text = f"{prefix} {grounded}".strip()
-        else:
-            target_text = grounded
+
+        # dont need florence-2 prefix (<OD>) for maira
+        target_text = grounded.strip()
 
         return {"image": image, "target_text": target_text, "image_name": item.get("image")}
 

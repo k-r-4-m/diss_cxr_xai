@@ -485,17 +485,7 @@ def setup_model_for_evaluation():
         processor = AutoProcessor.from_pretrained(BASE_MODEL, trust_remote_code=True)
         print("   ✅ Loaded processor from base model")
     
-    # 5. Set to eval mode
     model.eval()
-    
-    print("🎉 Model setup complete!")
-    
-    # Print some info
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    total_params = sum(p.numel() for p in model.parameters())
-    print(f"📊 Total parameters: {total_params:,}")
-    print(f"🎯 Trainable parameters: {trainable_params:,}")
-    print(f"💾 Model device: {next(model.parameters()).device}")
     
     return model, processor, config
 
@@ -558,6 +548,12 @@ with open(ANNOTATIONS_JSON, "r") as f:
         decoded = processor.decode(out_ids[0][prompt_len:], skip_special_tokens=True).lstrip()
 
         print(f"raw decoded: {decoded}")
+
+        # gets rid of the <OD> tags if they're in here for some reason
+        # the <OD> tags are from the florence-format jsonl file
+        decoded = decoded.replace("<OD> ", "")
+
+        print(f"new decoded: {decoded}")
 
         # language generation sometimes goes into a loop
         # if output is larger than 1000 characters, something is most likely wrong

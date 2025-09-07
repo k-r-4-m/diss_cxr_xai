@@ -1,5 +1,5 @@
 """
-    Visualises training images before and after data augmentation
+    Visualises training images before and after majority voting
 
     Requires:
         jsonl_path: A path to the annotations json file formatted in Florence-style

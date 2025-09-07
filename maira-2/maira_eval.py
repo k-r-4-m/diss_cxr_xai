@@ -448,48 +448,14 @@ def create_side_by_side_visualization(image, gt_detections, pred_detections, cla
 
     return save_path 
 
-
 ### loads model
-BASE_MODEL = "microsoft/maira-2"
-CHECKPOINT_PATH = "./maira_checkpoints/epoch_3"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+CHECKPOINT = "microsoft/maira-2"
+model = AutoModelForCausalLM.from_pretrained(CHECKPOINT, trust_remote_code=True)
+processor = AutoProcessor.from_pretrained(CHECKPOINT, trust_remote_code=True)
 
-def setup_model_for_evaluation():
-    print("🚀 Setting up model for evaluation...")
-    
-    # 1. Load config from base model
-    print("1. Loading config...")
-    config = AutoConfig.from_pretrained(BASE_MODEL, trust_remote_code=True)
-    
-    # 2. Load base model
-    print("2. Loading base model...")
-    base_model = AutoModelForCausalLM.from_pretrained(
-        BASE_MODEL,
-        config=config,
-        trust_remote_code=True,
-        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
-    ).to(DEVICE)
-    
-    # 3. Load your trained adapters
-    print("3. Loading trained adapters...")
-    model = PeftModel.from_pretrained(base_model, CHECKPOINT_PATH)
-    
-    # 4. Load processor
-    print("4. Loading processor...")
-    try:
-        # Try loading from checkpoint first
-        processor = AutoProcessor.from_pretrained(CHECKPOINT_PATH, trust_remote_code=True)
-        print("   ✅ Loaded processor from checkpoint")
-    except:
-        # Fallback to base model processor
-        processor = AutoProcessor.from_pretrained(BASE_MODEL, trust_remote_code=True)
-        print("   ✅ Loaded processor from base model")
-    
-    model.eval()
-    
-    return model, processor, config
-
-model, processor, config = setup_model_for_evaluation()
+model = model.eval()
+model = model.to(DEVICE)
 
 # gets num of total parameters
 total_params = sum(p.numel() for p in model.parameters())

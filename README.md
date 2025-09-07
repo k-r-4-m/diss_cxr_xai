@@ -79,7 +79,7 @@ Running the code to train Florence-2 and the ensemble model can be done so by ru
 
 Please be aware that these models require **significant** resources and time to run. Training was performed on NVIDIA A100 GPUs and 300GB of system RAM. If you attempt to run these models on weak GPUs, you will most likely get out of memory errors. The code should be able to run using only CPU if a CUDA GPU is not available, but this will take substantially longer.
 
-The model checkpoints used for the evaluation results in the dissertation report are stored in this repo.
+Given the file limits for GitHub repositories, the model checkpoints used for the evaluation results in the dissertation report are **NOT** stored in this repo.
 
 The code to fine tune MAIRA-2 (maira_train.py) has been included in this repository, but was **not** used in the final report.
 

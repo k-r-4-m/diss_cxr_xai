@@ -27,25 +27,22 @@ import tensorflow as tf
 
 print("RUNNING: ENSEMBLE TRAINING")
 
-# Dataset configuration
 DATA_DIR = 'output_dataset'
 TRAIN_DIR = os.path.join(DATA_DIR, 'train')
 VALID_DIR = os.path.join(DATA_DIR, 'valid')
 TRAIN_JSONL = os.path.join(TRAIN_DIR, 'annotations.jsonl')
 VALID_JSONL = os.path.join(VALID_DIR, 'annotations.jsonl')
 
-# Training configuration
 BATCH_SIZE = 10
-INPUT_SIZE = 1500  # Target size - all images have at least one side of 1500px
+INPUT_SIZE = 1500  # all images have at least one side of 1500px
 EPOCHS = 50
-LEARNING_RATE = 5e-6  # Slightly reduced for ensemble stability
+LEARNING_RATE = 5e-6 
 
-# Create directories for checkpoints
 CHECKPOINT_DIR = 'ensemble_checkpoints'
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
+# loads the annotations from the jsonl file and extract the labels
 def load_annotations(jsonl_path):
-    """Load annotations from JSONL file and extract labels"""
     annotations = {}
     all_labels = set()
     
@@ -55,34 +52,31 @@ def load_annotations(jsonl_path):
             image_name = data['image']
             suffix = data['suffix']
             
-            # Extract labels by removing <loc_xxx> tags
+            # extract labels by removing <loc_xxx> tags
             labels = []
             parts = suffix.split('<loc_')
             for i, part in enumerate(parts):
                 if i == 0:
-                    # First part contains the first label
+                    # first part contains the first label
                     if part.strip():
                         labels.append(part.strip())
                 else:
-                    # Find the next label after the location tag
+                    # find the next label after the loc tag
                     if '>' in part:
                         next_label = part.split('>', 1)[1].strip()
                         if next_label and not next_label.startswith('<'):
                             labels.append(next_label.split('<')[0].strip())
             
-            # Clean and filter labels
+            # cleans and filters labels
             clean_labels = [label.strip() for label in labels if label.strip()]
             annotations[image_name] = clean_labels
             all_labels.update(clean_labels)
     
     return annotations, sorted(list(all_labels))
 
-# Load training and validation annotations
-print("Loading annotations...")
 train_annotations, train_labels = load_annotations(TRAIN_JSONL)
 valid_annotations, valid_labels = load_annotations(VALID_JSONL)
 
-# Create unified label vocabulary
 all_unique_labels = sorted(list(set(train_labels + valid_labels)))
 N_CLASSES = len(all_unique_labels)
 
@@ -90,32 +84,29 @@ print(f'Total unique labels: {N_CLASSES}')
 print(f'Training samples: {len(train_annotations)}')
 print(f'Validation samples: {len(valid_annotations)}')
 
-# Create label mappings
+# makes a label mapping
 label_2_idx = {label: idx for idx, label in enumerate(all_unique_labels)}
 idx_2_label = {idx: label for label, idx in label_2_idx.items()}
 
 print(f"Labels: {all_unique_labels}")
 
+# pads images to a square of dimensions 1500x1500
+# maintains aspect ratio
+# all images have at least one side that is 1500px
 def pad_image_to_square(image, target_size=1500):
-    """
-    Pad image to 1500x1500 square while maintaining aspect ratio.
-    All images already have at least one side that is 1500px.
-    """
     h, w = image.shape[:2]
     
-    # pad shorter dimension to make images square
-    
-    # Calculate padding needed
+    # calc padding needed
     pad_h = target_size - h
     pad_w = target_size - w
     
-    # Pad equally on both sides (center the image)
+    # pad equally on both sides (centers the image)
     pad_top = pad_h // 2
     pad_bottom = pad_h - pad_top
     pad_left = pad_w // 2
     pad_right = pad_w - pad_left
     
-    # Apply padding with black pixels (0 values)
+    # apply padding with black pixels (0 values)
     padded_image = cv.copyMakeBorder(
         image, 
         pad_top, pad_bottom, pad_left, pad_right, 
@@ -125,8 +116,8 @@ def pad_image_to_square(image, target_size=1500):
     
     return padded_image
 
+# converts a list of labels to one-hot encoding
 def labels_to_one_hot(labels_list, n_classes=N_CLASSES, lookup_dict=label_2_idx):
-    """Convert list of labels to one-hot encoding"""
     y = np.zeros(n_classes)
     for label in labels_list:
         if label in lookup_dict:
@@ -143,10 +134,8 @@ def preprocess_for_model(image, model_type):
     else:
         return image.astype(np.float32) / 255.0
 
+# a generator that yields an sample one at a time
 def ImageDataGen(annotations_dict, img_dir, n_classes=N_CLASSES, input_size=INPUT_SIZE, returnIds=False):
-    """
-    Generator that yields one sample at a time: ([img_densenet, img_efficientnet], label)
-    """
     image_names = list(annotations_dict.keys())
     
     while True:
@@ -155,7 +144,6 @@ def ImageDataGen(annotations_dict, img_dir, n_classes=N_CLASSES, input_size=INPU
         for img_name in image_names:
             img_path = os.path.join(img_dir, img_name)
             
-            # Try different extensions if needed
             if not os.path.exists(img_path):
                 for ext in ['.jpg', '.png', '.jpeg']:
                     img_path_ext = os.path.join(img_dir, img_name.replace('.jpg', ext).replace('.png', ext).replace('.jpeg', ext))
@@ -181,7 +169,8 @@ def ImageDataGen(annotations_dict, img_dir, n_classes=N_CLASSES, input_size=INPU
                         yield ((img_densenet, img_efficientnet), y)
 
 
-# Create individual model branches
+## creates individual model branches
+# DenseNet branch
 def create_densenet_branch(input_shape=(1500, 1500, 3)):
     input_layer = Input(shape=input_shape, name='densenet_input')
     base_model = DenseNet121(weights='imagenet', include_top=False, input_tensor=input_layer)
@@ -196,6 +185,7 @@ def create_densenet_branch(input_shape=(1500, 1500, 3)):
     
     return Model(inputs=input_layer, outputs=x, name='densenet_branch')
 
+# EfficientNet branch
 def create_efficientnet_branch(input_shape=(1500, 1500, 3)):
     input_layer = Input(shape=input_shape, name='efficientnet_input')
     base_model = EfficientNetB5(weights='imagenet', include_top=False, input_tensor=input_layer)
@@ -210,23 +200,19 @@ def create_efficientnet_branch(input_shape=(1500, 1500, 3)):
     
     return Model(inputs=input_layer, outputs=x, name='efficientnet_branch')
 
+# creates the ensemble model by combining densenet and efficientnet
 def create_ensemble_model(n_classes=N_CLASSES, input_shape=(1500, 1500, 3)):
-    """Create ensemble model combining all three architectures"""
-    print("Creating individual model branches...")
-    
-    # Create individual branches
+    # create the individual branches
     densenet_branch = create_densenet_branch(input_shape)
     efficientnet_branch = create_efficientnet_branch(input_shape)
-    
-    print("Combining branches into ensemble...")
-    
-    # Combine the outputs
+
+    # combine the outputs
     combined = concatenate([
         densenet_branch.output,
         efficientnet_branch.output
     ], name='ensemble_concat')
     
-    # Add final classification layers
+    # adds final classification layers
     x = Dense(1024, activation='relu', name='ensemble_dense1')(combined)
     x = BatchNormalization(name='ensemble_bn1')(x)
     x = Dropout(0.4, name='ensemble_dropout1')(x)
@@ -235,10 +221,9 @@ def create_ensemble_model(n_classes=N_CLASSES, input_shape=(1500, 1500, 3)):
     x = BatchNormalization(name='ensemble_bn2')(x)
     x = Dropout(0.3, name='ensemble_dropout2')(x)
     
-    # Final output layer
+    # final output layer
     output = Dense(n_classes, activation='sigmoid', name='predictions')(x)
-    
-    # Create the final ensemble model
+
     model = Model(
         inputs=[densenet_branch.input, efficientnet_branch.input],
         outputs=output,
@@ -247,8 +232,6 @@ def create_ensemble_model(n_classes=N_CLASSES, input_shape=(1500, 1500, 3)):
     
     return model
 
-# Create ensemble model
-print("Creating ensemble model...")
 model = create_ensemble_model(N_CLASSES)
 
 # gets total number of parameters
@@ -266,11 +249,11 @@ print(f"Non-trainable params: {non_trainable_params:,}")
 # print("\nEnsemble Model Summary:")
 # model.summary()
 
-# Count total parameters
+# count total parameters
 total_params = model.count_params()
 print(f"\nTotal parameters: {total_params:,}")
 
-# Compile model with AdamW optimizer
+# compile model with AdamW optimizer
 print("Compiling model...")
 model.compile(
     optimizer=AdamW(learning_rate=LEARNING_RATE),
@@ -279,7 +262,7 @@ model.compile(
     metrics=['accuracy', 'precision', 'recall', AUC(multi_label=True)]
 )
 
-# Set up callbacks
+# set up callbacks
 model_checkpoint = ModelCheckpoint(
     os.path.join(CHECKPOINT_DIR, 'ensemble_effnetb5_dnet121.{epoch:02d}-{val_loss:.4f}.keras'),
     monitor='val_loss', 
@@ -296,20 +279,15 @@ reduce_learning_rate = ReduceLROnPlateau(
     min_lr=1e-8
 )
 
-# Optional: Early stopping (uncomment if needed)
+# early stopping (uncomment if needed)
 # early_stopping = EarlyStopping(
 #     monitor='val_loss',
-#     patience=10,  # Increased patience for ensemble
+#     patience=10,
 #     verbose=1,
 #     restore_best_weights=True
 # )
 
 callbacks = [model_checkpoint, reduce_learning_rate]
-
-# Create data generators
-print("Creating data generators...")
-# train_gen = ImageDataGen(train_annotations, TRAIN_DIR)
-# valid_gen = ImageDataGen(valid_annotations, VALID_DIR)
 
 # wraps generators in tf.data.Dataset.from_generator()
 # need to explicitly define output_signature for efficiennet
@@ -337,15 +315,12 @@ valid_gen = tf.data.Dataset.from_generator(
 ).batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
 
 
-# Calculate steps per epoch
+# calculate steps per epoch
 train_steps = np.ceil(len(train_annotations) / BATCH_SIZE).astype(int)
 valid_steps = np.ceil(len(valid_annotations) / BATCH_SIZE).astype(int)
 
 print(f"Training steps per epoch: {train_steps}")
 print(f"Validation steps per epoch: {valid_steps}")
-
-# Train the model
-print("Starting training...")
 
 # enabling mixed precision if available
 # is available on NVIDIA A100, so should work
@@ -365,7 +340,7 @@ history = model.fit(
     verbose=1
 )
 
-# Plot training history
+# plot training history
 plt.figure(figsize=(20, 5))
 
 plt.subplot(1, 4, 1)

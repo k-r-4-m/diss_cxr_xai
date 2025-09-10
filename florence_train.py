@@ -225,7 +225,7 @@ def train_model(train_loader, val_loader, model, processor, epochs=10, lr=1e-6):
 
             save_inference_results(model, val_loader.dataset, 6, save_dir="./training_images_annotated", epoch=str(epoch))
 
-        output_dir = f"./model_checkpoints/epoch_{epoch+1}"
+        output_dir = f"./florence_checkpoints/epoch_{epoch+1}"
         os.makedirs(output_dir, exist_ok=True)
         model.save_pretrained(output_dir)
         processor.save_pretrained(output_dir)

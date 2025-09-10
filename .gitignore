@@ -77,3 +77,8 @@ florence_attempt/old_files/*
 maira-2/OLD_maira_train.py
 maira-2/OLD_maira_train_2.py
 compare_text.py
+florence_attempt/*
+maira-2/*
+format_confusion_matrices.py
+/florence_checkpoints
+/ensemble_checkpoints

@@ -6,7 +6,7 @@
         Localisation performance (mean average precision)
 
     Requires:
-        Florence to have been pretrained with a model checkpoint stored in model_checkpoints/epoch_n
+        Florence to have been pretrained with a model checkpoint stored in florence_checkpoints/epoch_n
         VinDr-CXR to have been downloaded and preprocessed
 """
 
@@ -78,7 +78,7 @@ val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, collate_fn=collate_f
 
 ### loads model
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-CHECKPOINT = f"./model_checkpoints/epoch_{EPOCHS}"  # gets the last checkpoint of the model training
+CHECKPOINT = f"./florence_checkpoints/epoch_{EPOCHS}"  # gets the last checkpoint of the model training
 
 config = AutoConfig.from_pretrained(CHECKPOINT, trust_remote_code=True, revision=REVISION)
 config.vision_config.model_type = 'davit'

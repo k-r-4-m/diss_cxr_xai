@@ -7,7 +7,7 @@
         ROUGE-L (longest common subsequence)
 
     Requires:
-        Florence to have been pretrained with a model checkpoint stored in model_checkpoints/epoch_n
+        Florence to have been pretrained with a model checkpoint stored in florence_checkpoints/epoch_n
         PadChest to have been downloaded and preprocessed
 """
 
@@ -41,7 +41,7 @@ print("config loaded")
 
 ### loads model
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-CHECKPOINT = f"./model_checkpoints/epoch_{EPOCHS}"
+CHECKPOINT = f"./florence_checkpoints/epoch_{EPOCHS}"
 
 config = AutoConfig.from_pretrained(CHECKPOINT, trust_remote_code=True, revision=REVISION)
 config.vision_config.model_type = 'davit'

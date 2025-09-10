@@ -1,4 +1,10 @@
-# need transformers==4.51.3
+"""
+    Visualises the outputs of MAIRA-2 alongside the ground truth using bounding boxes
+
+    Requires:
+        A chest X-Ray file name *that is present in the validation dataset* given as an argument when running the file
+"""
+
 import os
 import re
 import json
@@ -313,51 +319,257 @@ def _to_pixel_box(b, W, H):
 # converts the MAIRA-2 output into a Detections object
 # MAIRA-2 output is quite different than Florence-2, explicit class names aren't given
 # need to extract any class names mentioned in each part of the report
-def parse_maira_prediction_to_detections(decoded_text: str, img_size: Tuple[int, int]) -> sv.Detections:
+# def parse_maira_prediction_to_detections(decoded_text: str, img_size: Tuple[int, int], processor) -> sv.Detections:
+#     if not decoded_text or not decoded_text.strip():
+#         return sv.Detections.empty()
+
+#     W, H = img_size
+#     xyxy, class_ids, confs = [], [], []
+#     unlocalised = []
+
+#     # for each <obj> block
+#     for obj in re.findall(r"<obj>(.*?)</obj>", decoded_text, flags=re.DOTALL | re.IGNORECASE):
+#         text_block = obj.strip()
+
+#         # skip negated findings
+#         if is_negated(text_block):
+#             print(f"Skipping negated finding: {text_block}")
+#             continue
+
+#         # looks for <box> tags
+#         box_match = re.search(r"<box><x(\d+)><y(\d+)><x(\d+)><y(\d+)>", text_block)
+#         clean_text = re.sub(r"<box>.*?</box>", "", text_block).strip()
+#         mapped = normalise_finding(clean_text)
+
+#         # skip findings not known
+#         if mapped is None:
+#             continue
+
+#         cid = CLASSES.index(mapped)
+
+#         if box_match:
+#             # extract the box, normalised in florence-style (i.e. 0-1000)
+#             x1, y1, x2, y2 = map(int, box_match.groups())
+#             # converts cords to 0-1 for maira
+#             norm_box = [x1 / 1000.0, y1 / 1000.0, x2 / 1000.0, y2 / 1000.0]
+#             # adjust the box back to the original image using the processor
+#             adjusted = processor.adjust_box_for_original_image_size(norm_box, width=W, height=H)
+#             # convert it to pixel cords
+#             px_box = [adjusted[0] * W, adjusted[1] * H, adjusted[2] * W, adjusted[3] * H]
+
+#             xyxy.append(px_box)
+#             class_ids.append(cid)
+#             confs.append(1.0)
+#         else:
+#             # prediction is unlocalised
+#             unlocalised.append(mapped)
+
+#     if not xyxy:
+#         dets = sv.Detections.empty()
+#     else:
+#         dets = sv.Detections(
+#             xyxy=np.array(xyxy, dtype=float),
+#             class_id=np.array(class_ids, dtype=int),
+#             confidence=np.array(confs, dtype=float),
+#         )
+#         dets.data['class_name'] = [CLASSES[cid] for cid in dets.class_id]
+
+#     dets.data['unlocalised'] = unlocalised
+#     return dets
+
+
+def parse_maira_prediction_to_detections(maira_output_or_text, img_size: Tuple[int, int], processor=None) -> sv.Detections:
     """
-    Parse raw decoded MAIRA output into strictly localised detections.
-    - Each <obj> block is handled independently
-    - Negated findings are skipped
-    - If no <box> present, the finding goes into `unlocalised` only
+    Parse MAIRA-2 output (either raw decoded text or processor-converted list)
+    and return sv.Detections aligned to the original image.
+
+    - Supports either a string (decoded_text) or the structured list returned by
+      processor.convert_output_to_plaintext_or_grounded_sequence(...).
+    - Correctly handles MAIRA bin coordinates (num_box_coord_bins, default 100).
+    - Maps square-normalised coords back to the original rectangular image by
+      accounting for the padding used to form the square (side = max(W,H)).
     """
-    if not decoded_text or not decoded_text.strip():
+    if maira_output_or_text is None:
         return sv.Detections.empty()
 
-    W, H = img_size
-    xyxy, class_ids, confs = [], [], []
+    W, H = img_size  # note: image.size = (width, height)
+
+    # Try to get number of bins (default 100)
+    num_bins = None
+    try:
+        num_bins = int(getattr(processor, "num_box_coord_bins", 100))
+    except Exception:
+        num_bins = 100
+
+    # If user passed decoded text (string), convert it to grounded sequence if possible
+    if isinstance(maira_output_or_text, str):
+        if processor is not None:
+            maira_items = processor.convert_output_to_plaintext_or_grounded_sequence(maira_output_or_text)
+        else:
+            # fallback: we will parse <obj>...<box><x..>... style directly below
+            maira_items = None
+    else:
+        maira_items = maira_output_or_text
+
+    xyxy = []
+    class_ids = []
+    confs = []
     unlocalised = []
 
-    for obj in re.findall(r"<obj>(.*?)</obj>", decoded_text, flags=re.DOTALL | re.IGNORECASE):
-        text_block = obj.strip()
+    side = max(W, H)
+    pad_x = (side - W) / 2.0
+    pad_y = (side - H) / 2.0
 
-        # skip negated findings
-        if is_negated(text_block):
-            print(f"Skipping negated finding: {text_block}")
-            continue
+    def _norm_from_raw_value(v):
+        """Convert a single raw coordinate to a normalized value relative to MAIRA square (0..1)."""
+        v = float(v)
+        if -1e-9 <= v <= 1.0 + 1e-9:
+            # already normalized
+            return max(0.0, min(1.0, v))
+        # If value looks like a bin index (e.g. 55 for 0.555)
+        if 0 <= v <= num_bins + 0.5:
+            return (v + 0.5) / float(num_bins)
+        # If value looks like Florence 0..1000 encoding
+        if v <= 1000.0:
+            # here we interpret v as 0..1000 coordinate relative to original image:
+            # convert to original pixel then to square-normalized
+            # for x coordinates scale by W, for y by H  but we don't know which coord this is here.
+            # The caller will handle mapping x vs y separately using W/H.
+            return v / 1000.0
+        # Fallback: treat as pixel coordinate on original image -> convert to square-normalized
+        # This will be handled by caller because we need to know axis size (W or H).
+        return v  # leave raw; caller will handle if >1
 
-        # Only process findings that have bounding boxes
-        box_match = re.search(r"<box><x(\d+)><y(\d+)><x(\d+)><y(\d+)>", text_block)
-        if not box_match:
-            print(f"No bounding box found for: {text_block}")
-            continue
+    # If we have structured items, they will be like: [("text", [(x,y,x2,y2), ...]), ...]
+    if maira_items is not None:
+        for entry in maira_items:
+            # entry can be tuple (text, boxes) or a plain string
+            if isinstance(entry, tuple) and len(entry) == 2:
+                finding_text, boxes = entry
+            elif isinstance(entry, str):
+                finding_text, boxes = entry, None
+            elif isinstance(entry, dict):
+                # handle shapes like {"text": "...", "boxes": [[...], ...]}
+                finding_text = entry.get("text") or entry.get("finding") or entry.get("label") or ""
+                boxes = entry.get("boxes") or entry.get("bboxes") or entry.get("bbox") or None
+            else:
+                continue
 
-        # Extract and clean the text (remove box tags)
-        clean_text = re.sub(r"<box>.*?</box>", "", text_block).strip()
-        
-        mapped = normalise_finding(clean_text)
-        if mapped is None:
-            print(f"Could not map finding to known class: {clean_text}")
-            continue
+            if not isinstance(finding_text, str) or not finding_text.strip():
+                continue
+            if is_negated(finding_text):
+                continue
 
-        print(f"Successfully mapped '{clean_text}' to class '{mapped}'")
-        
-        cid = CLASSES.index(mapped)
-        x1, y1, x2, y2 = map(int, box_match.groups())
-        x1, x2 = (x1/1000.0)*W, (x2/1000.0)*W
-        y1, y2 = (y1/1000.0)*H, (y2/1000.0)*H
-        xyxy.append([x1, y1, x2, y2])
-        class_ids.append(cid)
-        confs.append(1.0)
+            mapped = normalise_finding(finding_text)
+            if mapped is None:
+                # unlocalised mention (or unknown), keep as unlocalised
+                if finding_text.strip():
+                    unlocalised.append(finding_text.strip())
+                continue
+
+            cid = CLASSES.index(mapped)
+
+            if boxes is None:
+                unlocalised.append(mapped)
+                continue
+
+            for b in boxes:
+                if not (isinstance(b, (list, tuple)) and len(b) == 4):
+                    continue
+
+                # each b might be floats already normalized (0..1),
+                # or might be bin integers (e.g. 55),
+                # or might be 0..1000 integers.
+                bx = list(b)
+                # detect and convert:
+                mx = max(abs(v) for v in bx)
+                if mx <= 1.0 + 1e-9:
+                    norm_x1, norm_y1, norm_x2, norm_y2 = bx
+                elif mx <= num_bins + 1e-6:
+                    # bin indices: convert to normalized value using num_bins
+                    norm_x1 = (bx[0] + 0.5) / float(num_bins)
+                    norm_y1 = (bx[1] + 0.5) / float(num_bins)
+                    norm_x2 = (bx[2] + 0.5) / float(num_bins)
+                    norm_y2 = (bx[3] + 0.5) / float(num_bins)
+                elif mx <= 1000.0 + 1e-6:
+                    # Florence-style 0..1000 relative to original image
+                    # convert to pixel on original image, then to square normalized:
+                    px_x1 = (bx[0] / 1000.0) * W
+                    px_y1 = (bx[1] / 1000.0) * H
+                    px_x2 = (bx[2] / 1000.0) * W
+                    px_y2 = (bx[3] / 1000.0) * H
+                    # pixel on square = pixel_orig + pad
+                    sx1 = px_x1 + pad_x
+                    sy1 = px_y1 + pad_y
+                    sx2 = px_x2 + pad_x
+                    sy2 = px_y2 + pad_y
+                    norm_x1, norm_y1, norm_x2, norm_y2 = sx1 / side, sy1 / side, sx2 / side, sy2 / side
+                else:
+                    # assume these are pixel coords on original image already
+                    px_x1, px_y1, px_x2, px_y2 = bx
+                    sx1 = px_x1 + pad_x
+                    sy1 = px_y1 + pad_y
+                    sx2 = px_x2 + pad_x
+                    sy2 = px_y2 + pad_y
+                    norm_x1, norm_y1, norm_x2, norm_y2 = sx1 / side, sy1 / side, sx2 / side, sy2 / side
+
+                # Map square-normalized to pixel on square to pixel on original
+                sq_x1 = norm_x1 * side
+                sq_y1 = norm_y1 * side
+                sq_x2 = norm_x2 * side
+                sq_y2 = norm_y2 * side
+
+                px_x1 = sq_x1 - pad_x
+                px_y1 = sq_y1 - pad_y
+                px_x2 = sq_x2 - pad_x
+                px_y2 = sq_y2 - pad_y
+
+                # Clip coordinates to image bounds (float)
+                px_x1 = max(0.0, min(W, px_x1))
+                px_y1 = max(0.0, min(H, px_y1))
+                px_x2 = max(0.0, min(W, px_x2))
+                px_y2 = max(0.0, min(H, px_y2))
+
+                xyxy.append([px_x1, px_y1, px_x2, px_y2])
+                class_ids.append(cid)
+                confs.append(1.0)
+
+    else:
+        # fallback: parse raw decoded_text with <obj> and <box><x..> tags (if processor is not given)
+        decoded_text = maira_output_or_text
+        for obj in re.findall(r"<obj>(.*?)</obj>", decoded_text, flags=re.DOTALL | re.IGNORECASE):
+            text_block = obj.strip()
+            if is_negated(text_block):
+                continue
+            # find box tags with digits inside
+            box_match = re.search(r"<box><x(\d+)><y(\d+)><x(\d+)><y(\d+)>", text_block)
+            clean_text = re.sub(r"<box>.*?</box>", "", text_block).strip()
+            mapped = normalise_finding(clean_text)
+            if mapped is None:
+                continue
+            cid = CLASSES.index(mapped)
+            if box_match:
+                bvals = list(map(int, box_match.groups()))
+                # Interpret as bins (MAIRA uses bin tags)
+                norm_x1 = (bvals[0] + 0.5) / float(num_bins)
+                norm_y1 = (bvals[1] + 0.5) / float(num_bins)
+                norm_x2 = (bvals[2] + 0.5) / float(num_bins)
+                norm_y2 = (bvals[3] + 0.5) / float(num_bins)
+
+                # Map to pixels via square
+                sq_x1, sq_y1 = norm_x1 * side, norm_y1 * side
+                sq_x2, sq_y2 = norm_x2 * side, norm_y2 * side
+
+                px_x1 = max(0.0, min(W, sq_x1 - pad_x))
+                px_y1 = max(0.0, min(H, sq_y1 - pad_y))
+                px_x2 = max(0.0, min(W, sq_x2 - pad_x))
+                px_y2 = max(0.0, min(H, sq_y2 - pad_y))
+
+                xyxy.append([px_x1, px_y1, px_x2, px_y2])
+                class_ids.append(cid)
+                confs.append(1.0)
+            else:
+                unlocalised.append(mapped)
 
     if not xyxy:
         dets = sv.Detections.empty()
@@ -369,21 +581,10 @@ def parse_maira_prediction_to_detections(decoded_text: str, img_size: Tuple[int,
         )
         dets.data['class_name'] = [CLASSES[cid] for cid in dets.class_id]
 
-    # For unlocalised findings, process findings without boxes that aren't negated
-    for obj in re.findall(r"<obj>(.*?)</obj>", decoded_text, flags=re.DOTALL | re.IGNORECASE):
-        text_block = obj.strip()
-        
-        # Skip negated findings and findings with boxes (already processed above)
-        if is_negated(text_block) or re.search(r"<box>", text_block):
-            continue
-            
-        mapped = normalise_finding(text_block)
-        if mapped is not None:
-            unlocalised.append(mapped)
-
-    # Always attach unlocalised predictions as metadata
     dets.data['unlocalised'] = unlocalised
     return dets
+
+
 
 try:
     input_image = sys.argv[1]
@@ -461,13 +662,12 @@ else:
 
     print(f"maira out: {maira_output}")
 
-    prediction = parse_maira_prediction_to_detections(decoded, (W, H))
+    prediction = parse_maira_prediction_to_detections(decoded, (W, H), processor)
     prediction.data['class_name'] = [CLASSES[cid] for cid in prediction.class_id]
 
     image_np = np.array(image)
 
 
-# -------- colour helpers --------
 def class_base_colour(name: str) -> tuple:
     """Return consistent base colour (RGB tuple in 0-1) for a class."""
     if name in CLASS_COLOURS:
@@ -498,7 +698,7 @@ def draw_overlay(image_pil, target_dets, pred_dets, save_path="maira_output_visu
     fig, ax = plt.subplots(figsize=(10, 10))
     ax.imshow(img)
 
-    # --- Ground truth (solid, slightly lighter) ---
+    # ground truth boxes
     if target_dets is not None and len(target_dets) > 0:
         for xyxy, cname in zip(target_dets.xyxy, target_dets.data['class_name']):
             base = CLASS_COLOURS.get(cname.lower(), "#808080")  # default grey if missing
@@ -510,7 +710,7 @@ def draw_overlay(image_pil, target_dets, pred_dets, save_path="maira_output_visu
             ax.text(x1, max(y1 - 4, 0), f"{cname} (GT)", fontsize=10, color=col,
                     bbox=dict(boxstyle="round,pad=0.2", fc='white', ec='none', alpha=0.7))
 
-    # --- Prediction (dashed, darker) ---
+    # prediction boxes
     if pred_dets is not None and len(pred_dets) > 0:
         for xyxy, cname in zip(pred_dets.xyxy, pred_dets.data['class_name']):
             base = CLASS_COLOURS.get(cname.lower(), "#808080")  # default grey if missing
@@ -522,7 +722,6 @@ def draw_overlay(image_pil, target_dets, pred_dets, save_path="maira_output_visu
             ax.text(x1, max(y1 - 4, 0), f"{cname} (Pred)", fontsize=9, color=col,
                     bbox=dict(boxstyle="round,pad=0.2", fc='black', ec='none', alpha=0.35))
 
-    # --- Legend ---
     legend_elems = [
         Line2D([0], [0], color='black', lw=2.5, linestyle='-', label='Ground truth'),
         Line2D([0], [0], color='black', lw=2.0, linestyle='--', label='Prediction'),
@@ -530,15 +729,24 @@ def draw_overlay(image_pil, target_dets, pred_dets, save_path="maira_output_visu
     ax.legend(handles=legend_elems, loc='lower right')
     ax.axis('off')
 
-    # --- Unlocalised predictions ---
     if pred_dets is not None and 'unlocalised' in pred_dets.data and pred_dets.data['unlocalised']:
         unloc_text = "Predicted (no localisation): " + ", ".join(set(pred_dets.data['unlocalised']))
         ax.text(0.5, -0.05, unloc_text, fontsize=11, ha='center', va='top',
                 transform=ax.transAxes, color='red')
-
-    # --- Save image ---
+        
     plt.savefig(save_path, dpi=200, bbox_inches="tight")
     plt.close()
 
-# call it
+###
+# assume pred and gt are sv.Detections for the current image
+mean_average_precision = sv.MeanAveragePrecision.from_detections(
+    predictions=[prediction], 
+    targets=[target]
+)
+
+print(f"map50: {mean_average_precision.map50:.3f}")
+print(f"map75: {mean_average_precision.map75:.3f}")
+print(f"map50-95: {mean_average_precision.map50_95:.3f}")
+
+# draws the boxes
 draw_overlay(image, target, prediction)

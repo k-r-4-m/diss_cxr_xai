@@ -134,10 +134,19 @@ def normalise_finding(text: str) -> str:
 
     return None
 
-# parses the ground truth suffixess
+# creates an empty Detections object for unlocalised findings
+def create_empty_detections():
+    empty_det = sv.Detections.empty()
+    empty_det.data = {'class_name': [], 'unlocalised': []}
+    return empty_det
+
+# parses the ground truth suffixes found in the jsonl file
+# need to account for the suffix in florence style 
+    # the suffix is normalised between 0 and 1000 in relation to the ORIGINAL image size found in the DICOM files
 def parse_suffix_to_detections(suffix_text: str, classes: List[str], img_size: Tuple[int, int]) -> sv.Detections:
     if not suffix_text or not suffix_text.strip():
-        return sv.Detections.empty()
+        # return sv.Detections.empty()
+        return create_empty_detections()
 
     W, H = img_size
     xyxy = []
@@ -171,13 +180,24 @@ def parse_suffix_to_detections(suffix_text: str, classes: List[str], img_size: T
         confs.append(1.0)
 
     if not xyxy:
-        return sv.Detections.empty()
+        # return sv.Detections.empty()
+        return create_empty_detections()
 
-    return sv.Detections(
+    # return sv.Detections(
+    #     xyxy=np.array(xyxy, dtype=float),
+    #     class_id=np.array(class_ids, dtype=int),
+    #     confidence=np.array(confs, dtype=float),
+    # )
+    det = sv.Detections(
         xyxy=np.array(xyxy, dtype=float),
         class_id=np.array(class_ids, dtype=int),
         confidence=np.array(confs, dtype=float),
     )
+    det.data = {
+        'class_name': [classes[cid] for cid in det.class_id],
+        'unlocalised': []
+    }
+    return det
 
 # extracts individual findings from maira output
 def extract_findings_from_maira_text(text: str):
@@ -240,8 +260,7 @@ def _to_pixel_box(b, W, H):
 # converts the MAIRA-2 output into a Detections object
 # MAIRA-2 output is quite different than Florence-2, explicit class names aren't given
 # need to extract any class names mentioned in each part of the report
-def parse_maira_prediction_to_detections(maira_output, img_size: Tuple[int, int],) -> sv.Detections:
-    
+def parse_maira_prediction_to_detections(maira_output, img_size, processor):
     if not maira_output:
         return sv.Detections.empty()
 
@@ -282,7 +301,18 @@ def parse_maira_prediction_to_detections(maira_output, img_size: Tuple[int, int]
         if bboxes and len(bboxes) > 0:
             for b in bboxes:
                 if isinstance(b, (list, tuple)) and len(b) == 4:
-                    xyxy.append(_to_pixel_box(b, W, H))
+                    # xyxy.append(_to_pixel_box(b, W, H))
+                    
+                    # uses MAIRA-2's func to convert their adjusted box coords to original sizes
+                    adjusted = processor.adjust_box_for_original_image_size(b, width=W, height=H)
+
+                    # scale from [0,1] to pixel coords
+                    x1 = adjusted[0] * W
+                    y1 = adjusted[1] * H
+                    x2 = adjusted[2] * W
+                    y2 = adjusted[3] * H
+
+                    xyxy.append([x1, y1, x2, y2])
                     class_ids.append(cid)
                     confs.append(1.0)
         else:
@@ -531,7 +561,7 @@ with open(ANNOTATIONS_JSON, "r") as f:
         maira_output = processor.convert_output_to_plaintext_or_grounded_sequence(decoded)
         # expected: list of (finding_text, [(x1,y1,x2,y2)] or None)
 
-        pred = parse_maira_prediction_to_detections(maira_output, (W, H))
+        pred = parse_maira_prediction_to_detections(maira_output, (W, H), processor=processor)
         predictions.append(pred)
 
 
@@ -544,14 +574,69 @@ print(f"map50: {mean_average_precision.map50:.2f}")
 print(f"map75: {mean_average_precision.map75:.2f}")
 print(f"map50_95: {mean_average_precision.map50_95:.2f}")
 
-# compute AP per class
+# # compute AP per class
+# def compute_map_per_class(predictions, targets, class_id, iou_thresholds=[0.5, 0.75]):
+#     # filter predictions and targets for this class
+#     class_preds = []
+#     class_gts = []
+#     for pred, gt in zip(predictions, targets):
+#         pred_cls = pred[pred.class_id == class_id]
+#         gt_cls = gt[gt.class_id == class_id]
+#         class_preds.append(pred_cls)
+#         class_gts.append(gt_cls)
+
+#     # compute per-class AP
+#     # uses the mAP object, but is just doing over 1 class, so it's just AP
+#     map_metrics = sv.MeanAveragePrecision.from_detections(
+#         predictions=class_preds,
+#         targets=class_gts,
+#     )
+#     return map_metrics.map50, map_metrics.map75, map_metrics.map50_95
+
 def compute_map_per_class(predictions, targets, class_id, iou_thresholds=[0.5, 0.75]):
     # filter predictions and targets for this class
     class_preds = []
     class_gts = []
     for pred, gt in zip(predictions, targets):
-        pred_cls = pred[pred.class_id == class_id]
-        gt_cls   = gt[gt.class_id == class_id]
+        # Create masks for this class
+        pred_mask = pred.class_id == class_id
+        gt_mask = gt.class_id == class_id
+        
+        # Filter detections
+        if len(pred) > 0 and np.any(pred_mask):
+            pred_cls = sv.Detections(
+                xyxy=pred.xyxy[pred_mask],
+                class_id=pred.class_id[pred_mask],
+                confidence=pred.confidence[pred_mask]
+            )
+            # Initialize data dict for filtered detections
+            pred_cls.data = {}
+            if pred.data is not None:
+                for key, values in pred.data.items():
+                    if isinstance(values, list) and len(values) == len(pred):
+                        pred_cls.data[key] = [values[i] for i, m in enumerate(pred_mask) if m]
+                    else:
+                        pred_cls.data[key] = values
+        else:
+            pred_cls = create_empty_detections()
+            
+        if len(gt) > 0 and np.any(gt_mask):
+            gt_cls = sv.Detections(
+                xyxy=gt.xyxy[gt_mask],
+                class_id=gt.class_id[gt_mask],
+                confidence=gt.confidence[gt_mask]
+            )
+            # Initialize data dict for filtered detections
+            gt_cls.data = {}
+            if gt.data is not None:
+                for key, values in gt.data.items():
+                    if isinstance(values, list) and len(values) == len(gt):
+                        gt_cls.data[key] = [values[i] for i, m in enumerate(gt_mask) if m]
+                    else:
+                        gt_cls.data[key] = values
+        else:
+            gt_cls = create_empty_detections()
+            
         class_preds.append(pred_cls)
         class_gts.append(gt_cls)
 
@@ -619,8 +704,8 @@ def get_binary_confusion_matrix_for_class(class_id: int, class_name: str, predic
 
     # calculate per-class precision, recall, and F1 classification-style
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    recall    = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    f1        = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
 
     return cm, precision, recall, f1
 

@@ -10,20 +10,17 @@
 
 import os
 import torch
-# need transformers version 4.53.2
 from transformers import get_scheduler, AutoModelForCausalLM, AutoProcessor, AutoConfig  
 from peft import LoraConfig, get_peft_model
 from torch.utils.data import DataLoader, Dataset
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix
 from torchvision.transforms.functional import to_pil_image
-# from IPython.display import display
 from pydicom.pixel_data_handlers.util import apply_voi_lut
 from difflib import get_close_matches
 from typing import List, Dict, Any, Tuple, Generator
 from PIL import Image
 from tqdm import tqdm
-# from IPython.core.display import HTML
 from datetime import datetime
 from pathvalidate import sanitize_filename
 from florence_tools import *
@@ -56,6 +53,7 @@ OUTPUT_DIR = config.get('output_dir')
 BATCH_SIZE = config.get('batch_size')
 NUM_WORKERS = config.get('num_workers')
 USE_PEFT = config.get('use_peft')
+LR = 5e-6  # learning rate
 print("config loaded")
 
 # collates samples to form a batch of tensors
@@ -83,18 +81,6 @@ val_dataset = DetectionDataset(
     jsonl_file_path = f"{OUTPUT_DIR}/valid/annotations.jsonl",
     image_directory_path = f"{OUTPUT_DIR}/valid/"
 )
-
-# # builds the dataloader for the training set
-# train_dataset = DetectionDataset(
-#     jsonl_file_path = f"{OUTPUT_DIR}/train/annotations_caption_to_phrase.jsonl",
-#     image_directory_path = f"{OUTPUT_DIR}/train/"
-# )
-
-# # builds the dataloader for the validation set
-# val_dataset = DetectionDataset(
-#     jsonl_file_path = f"{OUTPUT_DIR}/valid/annotations_caption_to_phrase.jsonl",
-#     image_directory_path = f"{OUTPUT_DIR}/valid/"
-# )
 
 train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, collate_fn=collate_fn, num_workers=NUM_WORKERS, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, collate_fn=collate_fn, num_workers=NUM_WORKERS)
@@ -158,9 +144,7 @@ def save_inference_results(model, dataset: DetectionDataset, count: int, save_di
 save_inference_results(model, val_dataset, 4, save_dir="./before_training")
 
 
-## Fine-tune Florence-2 on custom object detection dataset
-
-# defines the train loop for the model
+# defines the train loop for florence-2
 def train_model(train_loader, val_loader, model, processor, epochs=10, lr=1e-6):
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     num_training_steps = epochs * len(train_loader)
@@ -230,9 +214,5 @@ def train_model(train_loader, val_loader, model, processor, epochs=10, lr=1e-6):
         model.save_pretrained(output_dir)
         processor.save_pretrained(output_dir)
 
-
-
-LR = 5e-6  # learning rate
-
-# runs the training loop to fine tune the model
+### runs the training loop to fine tune the model
 train_model(train_loader, val_loader, model, processor, epochs=EPOCHS, lr=LR)

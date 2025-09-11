@@ -4,19 +4,16 @@
 
 import os
 import torch
-# need transformers==4.51.3 
 from transformers import get_scheduler, AutoModelForCausalLM, AutoProcessor, AutoConfig  
 from torch.utils.data import DataLoader, Dataset
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix
 from torchvision.transforms.functional import to_pil_image
-# from IPython.display import display
 from pydicom.pixel_data_handlers.util import apply_voi_lut
 from difflib import get_close_matches
 from typing import List, Dict, Any, Tuple, Generator
 from PIL import Image
 from tqdm import tqdm
-# from IPython.core.display import HTML
 from datetime import datetime
 from pathvalidate import sanitize_filename
 from collections import defaultdict

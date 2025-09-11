@@ -6,7 +6,6 @@
 
 """
 
-
 import numpy as np
 import pandas as pd
 import cv2 as cv
@@ -33,7 +32,7 @@ VALID_DIR = os.path.join(DATA_DIR, 'valid')
 TRAIN_JSONL = os.path.join(TRAIN_DIR, 'annotations.jsonl')
 VALID_JSONL = os.path.join(VALID_DIR, 'annotations.jsonl')
 
-BATCH_SIZE = 10
+BATCH_SIZE = 10  # a batch size of 10 fits into 80GB of VRAM
 INPUT_SIZE = 1500  # all images have at least one side of 1500px
 EPOCHS = 50
 LEARNING_RATE = 5e-6 
@@ -244,8 +243,8 @@ print(f"Trainable params: {trainable_params:,}")
 print(f"Non-trainable params: {non_trainable_params:,}")
 
 
-# # print model summary
-# # this summary is VERY long
+## prints model summary
+## this summary is VERY long
 # print("\nEnsemble Model Summary:")
 # model.summary()
 
@@ -253,8 +252,8 @@ print(f"Non-trainable params: {non_trainable_params:,}")
 total_params = model.count_params()
 print(f"\nTotal parameters: {total_params:,}")
 
-# compile model with AdamW optimizer
-print("Compiling model...")
+# compile model with adamw
+print("Compiling model")
 model.compile(
     optimizer=AdamW(learning_rate=LEARNING_RATE),
     # loss='binary_crossentropy',
@@ -383,4 +382,3 @@ plt.close()
 
 print("Training completed!")
 print(f"Model checkpoints saved in: {CHECKPOINT_DIR}")
-print("Training history plot saved as: ensemble_training_history.png")

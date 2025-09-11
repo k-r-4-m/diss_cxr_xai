@@ -7,7 +7,7 @@
         Data augmentation
 
     Results in:
-        .png files of each chest X-Ray, split into training and validation sets
+        PNG files of each chest X-ray, split into training and validation sets
         A jsonl file detailing annotations for each chest X-Ray, with a seperate file for the training and validation sets
 
     Requires:
@@ -578,9 +578,7 @@ for split_name, split_ids in splits.items():
                 print(f"  {class_name}: {achieved}/{needed} samples added")
 
 
-print("\n" + "="*50)
-print("FINAL CLASS DISTRIBUTION SUMMARY")
-print("="*50)
+print("\nFinal class distribution summary")
 
 for split_name in ['train', 'valid']:
     print(f"\n{split_name.upper()} SET:")
@@ -592,7 +590,7 @@ for split_name in ['train', 'valid']:
             percentage = (count / total_samples) * 100
             print(f"  {class_name}: {count} ({percentage:.1f}%)")
     else:
-        print("  No annotations found")
+        print("No annotations found")
 
 # Combined statistics
 all_classes = set()
@@ -615,4 +613,4 @@ print(f"\nTarget was {TARGET_SAMPLES_PER_CLASS} per class")
 print("Deviation from target:")
 for class_name, count in sorted(combined_counts.items()):
     deviation = count - TARGET_SAMPLES_PER_CLASS
-    print(f"  {class_name}: {deviation:+d} ({count})")
+    print(f"{class_name}: {deviation:+d} ({count})")

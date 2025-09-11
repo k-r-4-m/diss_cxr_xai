@@ -5,9 +5,7 @@
         Classification performance (precision, recall, F1)
         Localisation performance (mean average precision)
 
-    REQUIRES TRANSFORMERS==4.51.3 !!!
-
-    Also requires a HuggingFace token that should be placed in token_file.yaml
+    Requires a HuggingFace token that should be placed in token_file.yaml
 """
 
 import os
@@ -574,25 +572,7 @@ print(f"map50: {mean_average_precision.map50:.2f}")
 print(f"map75: {mean_average_precision.map75:.2f}")
 print(f"map50_95: {mean_average_precision.map50_95:.2f}")
 
-# # compute AP per class
-# def compute_map_per_class(predictions, targets, class_id, iou_thresholds=[0.5, 0.75]):
-#     # filter predictions and targets for this class
-#     class_preds = []
-#     class_gts = []
-#     for pred, gt in zip(predictions, targets):
-#         pred_cls = pred[pred.class_id == class_id]
-#         gt_cls = gt[gt.class_id == class_id]
-#         class_preds.append(pred_cls)
-#         class_gts.append(gt_cls)
-
-#     # compute per-class AP
-#     # uses the mAP object, but is just doing over 1 class, so it's just AP
-#     map_metrics = sv.MeanAveragePrecision.from_detections(
-#         predictions=class_preds,
-#         targets=class_gts,
-#     )
-#     return map_metrics.map50, map_metrics.map75, map_metrics.map50_95
-
+# computes AP per class
 def compute_map_per_class(predictions, targets, class_id, iou_thresholds=[0.5, 0.75]):
     # filter predictions and targets for this class
     class_preds = []
@@ -648,7 +628,7 @@ def compute_map_per_class(predictions, targets, class_id, iou_thresholds=[0.5, 0
     )
     return map_metrics.map50, map_metrics.map75, map_metrics.map50_95
 
-# computes for all classes
+# computes AP for all classes
 print("\nPer-class AP values:")
 for class_id, class_name in enumerate(CLASSES):
     ap50, ap75, ap50_95 = compute_map_per_class(predictions, targets, class_id)

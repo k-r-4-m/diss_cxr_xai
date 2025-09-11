@@ -1,11 +1,12 @@
 num_workers: 0  # number of workers for data loading
 epochs: 50
-batch_size: 18
+batch_size: 18  # reduce if there are memory problems, a batch size of 18 fits into 80GB of VRAM
 revision: 'refs/pr/24'  # revision of florence-2 that fixes the GenerationMixin import error
-annotations_csv: './train_original.csv'
-output_dir: './output_dataset/'
-dicom_dir: './dicom/'
-use_peft: False
+annotations_csv: './train_original.csv'  # VinDr-CXR annotations csv
+output_dir: './output_dataset/'  # dataset for X-rays after preprocessing
+dicom_dir: './dicom/'  # folder for the original DICOM files in the VinDr dataset
+use_peft: False  # PEFT is not used in the final version of training shown in the dissertation, set to True if PEFT is desired/needed
 
+## PEFT parameters
 lora_r: 32
 lora_alpha: 16

@@ -47,7 +47,6 @@ import itertools
 
 print("RUNNING: FLORENCE EVALUATION")
 
-# loads the config file for epochs, revision, pathnames, etc.
 config_path = "./config.yaml"
 config = load_config(config_path)
 

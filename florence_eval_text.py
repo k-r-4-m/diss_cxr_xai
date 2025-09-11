@@ -25,7 +25,7 @@ from rouge_score import rouge_scorer
 from florence_tools import load_config
 import re
 
-print("RUNNING: FLORENCE CAPTIONING EVALUATION")
+print("RUNNING: FLORENCE TEXTUAL GENERATION EVALUATION")
 
 config_path = "./config.yaml"
 config = load_config(config_path)

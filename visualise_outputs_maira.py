@@ -70,6 +70,7 @@ df = pd.read_csv(ANNOTATIONS_CSV)
 CLASSES = df['class_name'].unique().tolist()
 CLASSES.remove("No finding")  # removes no finding from the classes list
 
+# colours for each class' bounding box
 CLASS_COLOURS = {
     "aortic enlargement": "#ff0000",
     "atelectasis": "#1e77b4",
@@ -86,7 +87,6 @@ CLASS_COLOURS = {
     "pneumothorax": "#ffba78",
     "pulmonary fibrosis": "#c5b0d4"
 }
-
 
 # a dictionary to map synonyms for classes
 # this is because MAIRA-2 will refer to classes by different names/terms
@@ -316,97 +316,31 @@ def _to_pixel_box(b, W, H):
     if y_max - y_min < 1: y_max = y_min + 1
     return [x_min, y_min, x_max, y_max]
 
-# converts the MAIRA-2 output into a Detections object
-# MAIRA-2 output is quite different than Florence-2, explicit class names aren't given
-# need to extract any class names mentioned in each part of the report
-# def parse_maira_prediction_to_detections(decoded_text: str, img_size: Tuple[int, int], processor) -> sv.Detections:
-#     if not decoded_text or not decoded_text.strip():
-#         return sv.Detections.empty()
 
-#     W, H = img_size
-#     xyxy, class_ids, confs = [], [], []
-#     unlocalised = []
-
-#     # for each <obj> block
-#     for obj in re.findall(r"<obj>(.*?)</obj>", decoded_text, flags=re.DOTALL | re.IGNORECASE):
-#         text_block = obj.strip()
-
-#         # skip negated findings
-#         if is_negated(text_block):
-#             print(f"Skipping negated finding: {text_block}")
-#             continue
-
-#         # looks for <box> tags
-#         box_match = re.search(r"<box><x(\d+)><y(\d+)><x(\d+)><y(\d+)>", text_block)
-#         clean_text = re.sub(r"<box>.*?</box>", "", text_block).strip()
-#         mapped = normalise_finding(clean_text)
-
-#         # skip findings not known
-#         if mapped is None:
-#             continue
-
-#         cid = CLASSES.index(mapped)
-
-#         if box_match:
-#             # extract the box, normalised in florence-style (i.e. 0-1000)
-#             x1, y1, x2, y2 = map(int, box_match.groups())
-#             # converts cords to 0-1 for maira
-#             norm_box = [x1 / 1000.0, y1 / 1000.0, x2 / 1000.0, y2 / 1000.0]
-#             # adjust the box back to the original image using the processor
-#             adjusted = processor.adjust_box_for_original_image_size(norm_box, width=W, height=H)
-#             # convert it to pixel cords
-#             px_box = [adjusted[0] * W, adjusted[1] * H, adjusted[2] * W, adjusted[3] * H]
-
-#             xyxy.append(px_box)
-#             class_ids.append(cid)
-#             confs.append(1.0)
-#         else:
-#             # prediction is unlocalised
-#             unlocalised.append(mapped)
-
-#     if not xyxy:
-#         dets = sv.Detections.empty()
-#     else:
-#         dets = sv.Detections(
-#             xyxy=np.array(xyxy, dtype=float),
-#             class_id=np.array(class_ids, dtype=int),
-#             confidence=np.array(confs, dtype=float),
-#         )
-#         dets.data['class_name'] = [CLASSES[cid] for cid in dets.class_id]
-
-#     dets.data['unlocalised'] = unlocalised
-#     return dets
-
-
+# parses the MAIRA-2 output
+    # MAIRA-2 outputs coordinates normalised between 0 and 1
+    # the MAIRA-2 processor has a built-in function to convert these coordinates, but the converted coordinates related to the actual input MAIRA-2 sees
+    # which is different to the original image because MAIRA-2 preprocesses input before it goes through the model (makes it smaller and square)
+# returns a Detections object aligned to the actual original image
 def parse_maira_prediction_to_detections(maira_output_or_text, img_size: Tuple[int, int], processor=None) -> sv.Detections:
-    """
-    Parse MAIRA-2 output (either raw decoded text or processor-converted list)
-    and return sv.Detections aligned to the original image.
-
-    - Supports either a string (decoded_text) or the structured list returned by
-      processor.convert_output_to_plaintext_or_grounded_sequence(...).
-    - Correctly handles MAIRA bin coordinates (num_box_coord_bins, default 100).
-    - Maps square-normalised coords back to the original rectangular image by
-      accounting for the padding used to form the square (side = max(W,H)).
-    """
     if maira_output_or_text is None:
         return sv.Detections.empty()
 
-    W, H = img_size  # note: image.size = (width, height)
+    W, H = img_size  # image.size = (width, height)
 
-    # Try to get number of bins (default 100)
+    # tries to get number of bins
     num_bins = None
     try:
         num_bins = int(getattr(processor, "num_box_coord_bins", 100))
     except Exception:
         num_bins = 100
 
-    # If user passed decoded text (string), convert it to grounded sequence if possible
+    # if a decoded text (string) was passed, convert it to a grounded sequence
     if isinstance(maira_output_or_text, str):
         if processor is not None:
             maira_items = processor.convert_output_to_plaintext_or_grounded_sequence(maira_output_or_text)
         else:
-            # fallback: we will parse <obj>...<box><x..>... style directly below
+            # fallback, uses parse <obj>...<box><x..>... style directly below
             maira_items = None
     else:
         maira_items = maira_output_or_text
@@ -420,27 +354,27 @@ def parse_maira_prediction_to_detections(maira_output_or_text, img_size: Tuple[i
     pad_x = (side - W) / 2.0
     pad_y = (side - H) / 2.0
 
+    # converts a single raw coordinate into a normalised value relative to MAIRA's 0-1 square
     def _norm_from_raw_value(v):
-        """Convert a single raw coordinate to a normalized value relative to MAIRA square (0..1)."""
         v = float(v)
         if -1e-9 <= v <= 1.0 + 1e-9:
             # already normalized
             return max(0.0, min(1.0, v))
-        # If value looks like a bin index (e.g. 55 for 0.555)
+        # if the value looks like a bin index (e.g. 55 for 0.555)
         if 0 <= v <= num_bins + 0.5:
             return (v + 0.5) / float(num_bins)
-        # If value looks like Florence 0..1000 encoding
+        # if the value looks like Florence 0-1000 encoding
         if v <= 1000.0:
-            # here we interpret v as 0..1000 coordinate relative to original image:
+            # need to interpret v as 0-1000 coordinate relative to original image
             # convert to original pixel then to square-normalized
-            # for x coordinates scale by W, for y by H  but we don't know which coord this is here.
-            # The caller will handle mapping x vs y separately using W/H.
+            # for x coordinates scale by W, for y by H but don't know which coord this is here
+            # caller handles mapping x vs y separately using W/H.
             return v / 1000.0
-        # Fallback: treat as pixel coordinate on original image -> convert to square-normalized
-        # This will be handled by caller because we need to know axis size (W or H).
-        return v  # leave raw; caller will handle if >1
+        # fallback, treats as pixel coordinate on original image, then converts to square-normalized
+        # handled by caller since need to know axes sizes
+        return v  # leaves raw, caller will handle if >1
 
-    # If we have structured items, they will be like: [("text", [(x,y,x2,y2), ...]), ...]
+    # maira items should be structured like [("text", [(x,y,x2,y2), ...]), ...]
     if maira_items is not None:
         for entry in maira_items:
             # entry can be tuple (text, boxes) or a plain string
@@ -477,23 +411,23 @@ def parse_maira_prediction_to_detections(maira_output_or_text, img_size: Tuple[i
                 if not (isinstance(b, (list, tuple)) and len(b) == 4):
                     continue
 
-                # each b might be floats already normalized (0..1),
+                # each b might be floats already normalized (0-1),
                 # or might be bin integers (e.g. 55),
-                # or might be 0..1000 integers.
+                # or might be 0-1000 integers.
                 bx = list(b)
                 # detect and convert:
                 mx = max(abs(v) for v in bx)
                 if mx <= 1.0 + 1e-9:
                     norm_x1, norm_y1, norm_x2, norm_y2 = bx
                 elif mx <= num_bins + 1e-6:
-                    # bin indices: convert to normalized value using num_bins
+                    # found bin indices, convert to normalized value using num_bins
                     norm_x1 = (bx[0] + 0.5) / float(num_bins)
                     norm_y1 = (bx[1] + 0.5) / float(num_bins)
                     norm_x2 = (bx[2] + 0.5) / float(num_bins)
                     norm_y2 = (bx[3] + 0.5) / float(num_bins)
                 elif mx <= 1000.0 + 1e-6:
-                    # Florence-style 0..1000 relative to original image
-                    # convert to pixel on original image, then to square normalized:
+                    # found florence-style 0-1000 normalised
+                    # converts to pixel on original image, then to square normalised
                     px_x1 = (bx[0] / 1000.0) * W
                     px_y1 = (bx[1] / 1000.0) * H
                     px_x2 = (bx[2] / 1000.0) * W
@@ -513,7 +447,7 @@ def parse_maira_prediction_to_detections(maira_output_or_text, img_size: Tuple[i
                     sy2 = px_y2 + pad_y
                     norm_x1, norm_y1, norm_x2, norm_y2 = sx1 / side, sy1 / side, sx2 / side, sy2 / side
 
-                # Map square-normalized to pixel on square to pixel on original
+                # maps square-normalised to pixel on square to pixel on original
                 sq_x1 = norm_x1 * side
                 sq_y1 = norm_y1 * side
                 sq_x2 = norm_x2 * side
@@ -524,7 +458,7 @@ def parse_maira_prediction_to_detections(maira_output_or_text, img_size: Tuple[i
                 px_x2 = sq_x2 - pad_x
                 px_y2 = sq_y2 - pad_y
 
-                # Clip coordinates to image bounds (float)
+                # clips the coordinates to image bounds (float)
                 px_x1 = max(0.0, min(W, px_x1))
                 px_y1 = max(0.0, min(H, px_y1))
                 px_x2 = max(0.0, min(W, px_x2))
@@ -535,7 +469,7 @@ def parse_maira_prediction_to_detections(maira_output_or_text, img_size: Tuple[i
                 confs.append(1.0)
 
     else:
-        # fallback: parse raw decoded_text with <obj> and <box><x..> tags (if processor is not given)
+        # fallback, parses raw decoded_text with <obj> and <box><x..> tags (if processor is not given)
         decoded_text = maira_output_or_text
         for obj in re.findall(r"<obj>(.*?)</obj>", decoded_text, flags=re.DOTALL | re.IGNORECASE):
             text_block = obj.strip()
@@ -550,13 +484,13 @@ def parse_maira_prediction_to_detections(maira_output_or_text, img_size: Tuple[i
             cid = CLASSES.index(mapped)
             if box_match:
                 bvals = list(map(int, box_match.groups()))
-                # Interpret as bins (MAIRA uses bin tags)
+                # interpret as bins (MAIRA uses bin tags)
                 norm_x1 = (bvals[0] + 0.5) / float(num_bins)
                 norm_y1 = (bvals[1] + 0.5) / float(num_bins)
                 norm_x2 = (bvals[2] + 0.5) / float(num_bins)
                 norm_y2 = (bvals[3] + 0.5) / float(num_bins)
 
-                # Map to pixels via square
+                # map to pixels via square
                 sq_x1, sq_y1 = norm_x1 * side, norm_y1 * side
                 sq_x2, sq_y2 = norm_x2 * side, norm_y2 * side
 
@@ -583,8 +517,6 @@ def parse_maira_prediction_to_detections(maira_output_or_text, img_size: Tuple[i
 
     dets.data['unlocalised'] = unlocalised
     return dets
-
-
 
 try:
     input_image = sys.argv[1]

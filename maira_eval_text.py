@@ -6,9 +6,7 @@
         BLEU-4 (4-gram precision)
         ROUGE-L (longest common subsequence)
 
-    REQUIRES TRANSFORMERS==4.51.3 !!!
-
-    Also requires a HuggingFace token that should be placed in token_file.yaml
+    Requires a HuggingFace token that should be placed in token_file.yaml
 """
 
 import os
@@ -37,7 +35,7 @@ from pathvalidate import sanitize_filename
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 from rouge_score import rouge_scorer
 
-print("RUNNING: MAIRA TEXTUAL EVALUATION")
+print("RUNNING: MAIRA TEXTUAL GENERATION EVALUATION")
 
 OUTPUT_DIR = './padchest/'
 ANNOTATIONS_JSON = f'{OUTPUT_DIR}/annotations.jsonl'

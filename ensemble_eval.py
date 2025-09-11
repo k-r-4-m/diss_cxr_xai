@@ -30,7 +30,6 @@ print("RUNNING: ENSEMBLE EVALUATION")
 DATA_DIR = 'output_dataset'
 VALID_DIR = os.path.join(DATA_DIR, 'valid')
 VALID_JSONL = os.path.join(VALID_DIR, 'annotations.jsonl')
-# ENSEMBLE_CHECKPOINT_DIR = 'ensemble_checkpoints_no_focal'
 ENSEMBLE_CHECKPOINT_DIR = 'ensemble_checkpoints'
 INPUT_SIZE = 1500
 BATCH_SIZE = 9
@@ -204,7 +203,6 @@ print(f"{N_CLASSES} classes: {CLASSES}")
 
 # loads the model checkpoint
 print("Loading model")
-# model_path = get_last_epoch_model(ENSEMBLE_CHECKPOINT_DIR)
 model_path = get_best_model_by_loss(ENSEMBLE_CHECKPOINT_DIR)
 
 if model_path is None:
@@ -316,7 +314,9 @@ for i, label in enumerate(CLASSES):
     
     print(f"{label:<20} {prec:<10.3f} {rec:<8.3f} {f1c:<8.3f}")
 
-### testing different thresholds (don't remove)
+### testing different global thresholds
+## uncomment if you want to run stepped threshold analysis
+## this is not used in the final training in the dissertation
 # print(f"\nThreshold analysis: ")
 # thresholds = np.arange(0.1, 0.9, 0.1)
 # threshold_results = []

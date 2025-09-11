@@ -2,8 +2,9 @@
     Plots the distribution of classes before and after majority voting in the dataset using a bar plot
 
     Requires:
-        annotations_train.jsonl: The jsonl file for the training annotations
-        annotations_valid.jsonl: The jsonl file for the validation annotations
+        The two annotations.jsonl files in the training and validation directories
+        The training annotations file to be renamed as annotations_train.jsonl
+        The validation annotations file to be renamed as annotations_valid.jsonl
 """
 
 import pandas as pd
@@ -58,7 +59,7 @@ width = 0.4
 cmap = plt.get_cmap("tab20")  # colour map
 colours = [cmap(i % 20) for i in range(len(all_classes))]
 
-# plots the comparison chart
+# plots the comparison chart of classes before and after voting (fig 3.6)
 plt.figure(figsize=(8, 6))
 for i, cls in enumerate(all_classes):
     plt.bar(x[i] - width/2, before_vals[i], width=width, color=colours[i])
@@ -70,7 +71,7 @@ plt.ylabel("Count")
 plt.tight_layout()
 plt.show()
 
-# plots ONLY the original annotations csv file
+# plots ONLY the original annotations csv file (fig. 3.3)
 plt.figure(figsize=(6, 6))
 plt.bar(before_counts.index, before_counts.values, color=colours[:len(before_counts)])
 plt.xticks(rotation=90, ha='right')
@@ -80,7 +81,7 @@ plt.tight_layout()
 plt.show()
 
 
-# plotting after augmentation
+# plotting after augmentation (fig. 3.7)
 after_counts_incl_aug = Counter()
 
 for file in ["annotations_train.jsonl", "annotations_valid.jsonl"]:

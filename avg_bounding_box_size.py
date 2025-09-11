@@ -1,6 +1,6 @@
 """
     Computes the average width and height of items in the VinDr-CXR dataset
-    Requires the train_original.csv with the image annotations
+    Requires train_original.csv from VinDr-CXR that contains the image annotations
 """
 
 import pandas as pd

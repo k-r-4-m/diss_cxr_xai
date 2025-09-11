@@ -6,8 +6,6 @@
         A chest X-Ray file name *that is present in the validation dataset* given as an argument when running the file
 """
 
-
-# need transformers version>=4.53.1
 from transformers import get_scheduler, AutoModelForCausalLM, AutoProcessor, AutoConfig  
 from peft import LoraConfig, get_peft_model
 from torch.utils.data import DataLoader, Dataset
@@ -77,6 +75,7 @@ df = pd.read_csv(ANNOTATIONS_CSV)
 CLASSES = df['class_name'].unique().tolist()
 CLASSES.remove("No finding")  # removes no finding from the classes list
 
+# colours for each class' bounding box
 CLASS_COLOURS = {
     "aortic enlargement": "#ff0000",
     "atelectasis": "#1e77b4",

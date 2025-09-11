@@ -82,3 +82,6 @@ maira-2/*
 format_confusion_matrices.py
 /florence_checkpoints
 /ensemble_checkpoints
+annotations_train.jsonl
+annotations_valid.jsonl
+train_original.csv

@@ -63,7 +63,7 @@ IMAGE_PATH = f"{OUTPUT_DIR}/valid"
 ### loads model
 # DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DEVICE = torch.device("cpu")
-CHECKPOINT = f"./model_checkpoints/epoch_{EPOCHS}"  # gets the last checkpoint of the model training
+CHECKPOINT = f"./florence_checkpoints/epoch_{EPOCHS}"  # gets the last checkpoint of the model training
 
 config = AutoConfig.from_pretrained(CHECKPOINT, trust_remote_code=True, revision=REVISION)
 config.vision_config.model_type = 'davit'

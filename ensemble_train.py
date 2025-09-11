@@ -380,5 +380,5 @@ plt.tight_layout()
 plt.savefig('ensemble_training_history.png', dpi=300, bbox_inches='tight')
 plt.close()
 
-print("Training completed!")
+print("Training completed")
 print(f"Model checkpoints saved in: {CHECKPOINT_DIR}")

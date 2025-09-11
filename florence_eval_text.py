@@ -124,7 +124,7 @@ results_file.close()
 
 ### metrics
 bleu1_scores = [
-    sentence_bleu([ref.split()], pred.split(), weights=(1), smoothing_function=smooth_fn)
+    sentence_bleu([ref.split()], pred.split(), weights=(1, 0, 0, 0), smoothing_function=smooth_fn)
     for ref, pred in zip(targets, predictions)
 ]
 bleu4_scores = [

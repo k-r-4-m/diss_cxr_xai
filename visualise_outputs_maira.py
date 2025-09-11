@@ -95,7 +95,7 @@ CLASS_SYNONYMS = {
     "aortic enlargement": ["tortuous aorta", "enlarged aorta", "widened aortic contour", "aortic elongation", "aorta is tortuous", "aorta is markedly tortuous"],
     "atelectasis": [],
     "calcification": ["calcified"],
-    "cardiomegaly": ["enlarged heart", "big heart", "increased cardiac silhouette", "heart size is enlarged", "heart size is slightly enlarged", "cardiac silhouette is mildly enlarged"],
+    "cardiomegaly": ["enlarged heart", "big heart", "increased cardiac silhouette", "heart size is enlarged", "heart size is slightly enlarged", "cardiac silhouette is enlarged", "cardiac silhouette is mildly enlarged"],
     "consolidation": ["lung consolidation", "consolidative opacity"],
     "ild": ["interstitial lung disease", "interstitial prominence", "interstitial lung"],
     "infiltration": ["infiltrates", "infiltrate"],
